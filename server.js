@@ -1062,24 +1062,40 @@ app.post('/api/voice/video-narration', requireFirebaseUser, upload.single('video
       `Durasi video ${duration.toFixed(1)} detik. Tulis sekitar ${targetWords} kata, sesuai durasi ini pada kecepatan narasi alami sekitar 120 kata per menit. Jangan melebihi 4.800 karakter karena suara AI menerima maksimal 5.000 karakter.`,
       `Panduan audio: ${audioContext}`,
       framePaths.length ? `Frame berurutan diambil pada perkiraan waktu ${sampledTimes.join(', ')}.` : 'Tidak ada frame visual yang dapat dibaca.',
-      'Kembalikan hanya JSON valid dengan format {"narration":"teks narasi lengkap"}.'
+      'Kembalikan hanya teks narasi biasa, tanpa JSON, tanpa markdown, tanpa judul, dan tanpa penjelasan tambahan.'
     ].join('\n\n');
     const parts = [{ text: prompt }];
     if (audioPart) parts.push(audioPart);
     for (const framePath of framePaths) parts.push({ inlineData: { mimeType: 'image/jpeg', data: await fs.readFile(framePath, 'base64') } });
     const result = await geminiRequest(process.env.GEMINI_MODEL || MODEL, {
       contents: [{ parts }],
-      generationConfig: { temperature: 0.45, responseMimeType: 'application/json', maxOutputTokens: Math.min(1800, Math.max(160, targetWords * 3)) }
+      generationConfig: { temperature: 0.45, maxOutputTokens: Math.min(1800, Math.max(160, targetWords * 3)) }
     }, null, 120000);
-    const narrationData = parseSeoMetadata(responseText(result));
-    const narration = String(narrationData?.narration || narrationData?.script || '').trim();
-    if (!narration || narration.length > 5000) return res.status(502).json({ error: 'Gemini belum menghasilkan naskah yang sesuai batas suara. Coba video yang lebih singkat.' });
+    const modelOutput = responseText(result).trim().replace(/^```(?:text|json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    let narration = modelOutput;
+    try {
+      const parsed = JSON.parse(modelOutput);
+      if (typeof parsed === 'string') narration = parsed;
+      else if (parsed && typeof parsed === 'object') narration = String(parsed.narration || parsed.script || modelOutput);
+    } catch {
+      const narrationField = modelOutput.match(/^\s*\{\s*"(?:narration|script)"\s*:\s*("(?:\\.|[^"\\])*")/s);
+      if (narrationField) {
+        try { narration = JSON.parse(narrationField[1]); } catch { /* gunakan output teks mentah */ }
+      }
+    }
+    narration = String(narration || '').trim();
+    if (!narration) return res.status(502).json({ error: 'Gemini tidak mengirim teks narasi. Coba lagi.' });
+    if (narration.length > 5000) return res.status(422).json({ error: 'Narasi melebihi batas suara 5.000 karakter. Coba video yang lebih singkat.' });
     res.set('Cache-Control', 'no-store');
     return res.json({ narration, durationSeconds: duration, targetWords });
   } catch (error) {
     console.warn('[voice-video-narration] analysis failed:', error.message || error.name || 'Error');
     const status = error.status === 422 ? 422 : error.status === 429 ? 429 : 502;
-    return res.status(status).json({ error: status === 422 ? error.message : 'AI tidak dapat menganalisis video saat ini. Periksa kuota Gemini lalu coba lagi.' });
+    const message = status === 422 ? error.message
+      : status === 429 ? 'Kuota Gemini atau batas permintaan tercapai. Coba lagi nanti.'
+        : error.status === 401 || error.status === 403 ? 'API key Gemini ditolak atau belum memiliki akses ke model.'
+          : 'Gemini gagal memproses video. Coba lagi sebentar.';
+    return res.status(status).json({ error: message });
   } finally {
     await cleanup(req.file?.path, audioPath, ...allFramePaths);
   }
