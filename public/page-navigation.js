@@ -56,15 +56,25 @@ window.addEventListener('pageshow', () => {
   document.body.classList.remove('page-loading');
 });
 
-function reportFrameSize() {
-  if (window.parent === window) return;
-  const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0, window.innerHeight);
-  window.parent.postMessage({ source: 'videoteks-feature', type: 'frame-size', height }, location.origin);
+const contentSizedRoutes = new Set(['audio.html', 'voice.html']);
+if (window.parent !== window && contentSizedRoutes.has(location.pathname.split('/').pop())) {
+  let lastReportedHeight = 0;
+  let reportScheduled = false;
+  const reportFrameSize = () => {
+    if (reportScheduled) return;
+    reportScheduled = true;
+    requestAnimationFrame(() => {
+      reportScheduled = false;
+      const height = Math.ceil(Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0, window.innerHeight));
+      if (Math.abs(height - lastReportedHeight) < 2) return;
+      lastReportedHeight = height;
+      window.parent.postMessage({ source: 'videoteks-feature', type: 'frame-size', height }, location.origin);
+    });
+  };
+  window.addEventListener('load', reportFrameSize, { once: true });
+  window.addEventListener('resize', reportFrameSize, { passive: true });
+  if (window.ResizeObserver) new ResizeObserver(reportFrameSize).observe(document.documentElement);
 }
-
-window.addEventListener('load', reportFrameSize);
-window.addEventListener('resize', reportFrameSize);
-if (window.ResizeObserver) new ResizeObserver(reportFrameSize).observe(document.documentElement);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
