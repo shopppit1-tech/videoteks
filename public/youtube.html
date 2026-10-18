@@ -16,9 +16,10 @@
   <style>
     :root{--bg:#0c141d;--panel:#202a35;--muted:#aeb8c6;--white:#f7f8fb;--accent:#ff3b4e;--purple:#8b5cf6;--blue:#35a9ff}
     *{box-sizing:border-box}
-    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--white);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overscroll-behavior-y:none}
-    body{min-height:100dvh}
-    .youtube-app{width:min(100%,520px);min-height:100dvh;margin:auto;padding:12px 14px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px;background:linear-gradient(180deg,#111a24,#0f1821)}
+    html{height:auto!important;min-height:100%;overflow-y:auto!important;overflow-x:hidden!important}
+    html,body{margin:0;min-height:100%;height:auto!important;background:var(--bg);color:var(--white);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overscroll-behavior-y:auto!important}
+    body{min-height:100dvh;overflow-y:scroll!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;touch-action:pan-y!important}
+    .youtube-app{width:min(100%,520px);min-height:100dvh;height:auto!important;max-height:none!important;overflow:visible!important;margin:auto;padding:12px 14px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px;background:linear-gradient(180deg,#111a24,#0f1821)}
     .page-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;flex:0 0 auto}.page-nav a{min-width:0;text-align:center;text-decoration:none;color:#dbe1e9;background:#202a35;border:1px solid #ffffff18;border-radius:11px;padding:8px 4px;font-size:10px;line-height:1.2;font-weight:750;white-space:normal}.page-nav a:hover{border-color:#9c5eff}
     .hero{padding:4px 2px 2px}.eyebrow{margin:0 0 7px;color:#ff8992;font-size:10px;font-weight:850;letter-spacing:1.4px;text-transform:uppercase}.hero h1{margin:0;font-size:clamp(25px,7vw,34px);line-height:1.08;letter-spacing:-.8px}.hero p:last-child{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
     .card{padding:14px;background:var(--panel);border:1px solid #ffffff0d;border-radius:17px;box-shadow:0 12px 32px #0002}.card-title{margin:0 0 6px;font-size:14px}.muted{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
