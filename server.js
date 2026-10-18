@@ -221,7 +221,7 @@ function coolDownGeminiKeyAfterFailure(apiKey, error) {
   rotateGeminiKeyAfter(apiKey);
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-async function geminiRequest(model, body, fixedKey = null) {
+async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000) {
   const models = [model || 'gemini-3.8-flash'];
   let lastError;
   while (true) {
@@ -238,10 +238,10 @@ async function geminiRequest(model, body, fixedKey = null) {
           let r;
           try {
             r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000)
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs)
             });
           } catch (error) {
-            lastError = new Error(error.name === 'TimeoutError' ? 'Gemini request timeout setelah 30 detik.' : `Gemini request gagal: ${error.message}`);
+            lastError = new Error(error.name === 'TimeoutError' ? `Gemini request timeout setelah ${Math.round(timeoutMs / 1000)} detik.` : `Gemini request gagal: ${error.message}`);
             lastError.status = 503;
             if (attempt === 1) { coolDownGeminiKeyAfterFailure(apiKey, lastError); break; }
             await sleep(1200 * (attempt + 1));
@@ -324,6 +324,18 @@ async function uploadToGemini(filePath, mimeType, apiKey) {
     throw error;
   }
   return fileInfo.file;
+}
+async function deleteGeminiFile(fileName, apiKey) {
+  const name = String(fileName || '').replace(/^\/+/, '');
+  if (!/^files\/[A-Za-z0-9_-]+$/.test(name)) return;
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${name}`, {
+      method: 'DELETE', headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(15000)
+    });
+    if (!response.ok && response.status !== 404) console.warn(`[youtube-seo] Gemini temporary audio delete failed: HTTP ${response.status}`);
+  } catch (error) {
+    console.warn('[youtube-seo] Gemini temporary audio delete failed:', error.name || 'network error');
+  }
 }
 function jsonPart(text) {
   const raw = String(text || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
@@ -668,6 +680,119 @@ app.get('/api/youtube/seo-status', requireFirebaseUser, (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const config = youtubeSeoAIConfig();
   res.json({ configured: Boolean(config), model: config?.model || null });
+});
+
+app.post('/api/youtube/seo-video-metadata', requireFirebaseUser, upload.single('video'), async (req, res) => {
+  const config = youtubeSeoAIConfig();
+  const audioPath = req.file ? `${req.file.path}.seo.mp3` : null;
+  const framePaths = [];
+  const frameId = crypto.randomUUID();
+  const framePattern = path.join(os.tmpdir(), `videoteks-seo-${frameId}-%02d.jpg`);
+  const allFramePaths = Array.from({ length: 12 }, (_, index) => path.join(os.tmpdir(), `videoteks-seo-${frameId}-${String(index).padStart(2, '0')}.jpg`));
+  let geminiAudioFile = null;
+  try {
+    if (!config) return res.status(503).json({ error: 'Gemini SEO YouTube khusus belum dikonfigurasi di server.' });
+    if (!req.file) return res.status(400).json({ error: 'Pilih file video terlebih dahulu.' });
+    if (String(req.body?.consent || '') !== 'true') return res.status(400).json({ error: 'Setujui analisis audio dan cuplikan gambar video untuk membuat metadata SEO.' });
+    if (req.file.mimetype && !req.file.mimetype.startsWith('video/') && req.file.mimetype !== 'application/octet-stream') {
+      return res.status(415).json({ error: 'File yang dipilih bukan format video yang didukung.' });
+    }
+
+    let duration;
+    try {
+      const probe = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', req.file.path]);
+      duration = Number.parseFloat(probe.stdout.trim());
+      if (!Number.isFinite(duration) || duration <= 0) throw new Error('durasi tidak valid');
+    } catch {
+      const error = new Error('Video tidak dapat dibaca. Pastikan berkas video valid dan coba lagi.');
+      error.status = 422;
+      throw error;
+    }
+
+    const frameFps = Math.min(1, 12 / duration);
+    await exec('ffmpeg', ['-y', '-i', req.file.path, '-vf', `fps=${frameFps.toFixed(6)},scale=640:-2`, '-frames:v', '12', '-q:v', '7', '-start_number', '0', framePattern]);
+    for (const framePath of allFramePaths) {
+      try { await fs.stat(framePath); framePaths.push(framePath); } catch { break; }
+    }
+
+    const audioProbe = await exec('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index', '-of', 'csv=p=0', req.file.path]);
+    const hasAudio = Boolean(audioProbe.stdout.trim());
+    let audioPart = null;
+    let audioContext = 'Tidak ada track audio yang dapat diekstrak; gunakan hanya bukti visual dari frame sampel.';
+    if (hasAudio) {
+      let audioWindows = null;
+      if (duration <= 1200) {
+        await exec('ffmpeg', ['-y', '-i', req.file.path, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '32k', '-f', 'mp3', audioPath]);
+        audioContext = 'Audio penuh video disertakan.';
+      } else {
+        const windowSeconds = 240;
+        const starts = [...new Set([0, Math.max(0, Math.floor(duration / 2 - windowSeconds / 2)), Math.max(0, Math.floor(duration - windowSeconds))])];
+        const splitOutputs = starts.map((_, index) => `[source${index}]`).join('');
+        const splitFilter = `[0:a]asplit=${starts.length}${splitOutputs}`;
+        const trimFilters = starts.map((start, index) => `[source${index}]atrim=start=${start}:end=${Math.min(duration, start + windowSeconds)},asetpts=PTS-STARTPTS[audio${index}]`).join(';');
+        const concatInputs = starts.map((_, index) => `[audio${index}]`).join('');
+        const filter = `${splitFilter};${trimFilters};${concatInputs}concat=n=${starts.length}:v=0:a=1[out]`;
+        await exec('ffmpeg', ['-y', '-i', req.file.path, '-filter_complex', filter, '-map', '[out]', '-vn', '-ac', '1', '-ar', '16000', '-b:a', '32k', '-f', 'mp3', audioPath]);
+        audioWindows = starts.map((start) => `${Math.floor(start / 60)}:${String(Math.floor(start % 60)).padStart(2, '0')}`);
+        audioContext = `Audio disampel dari bagian awal, tengah, dan akhir video; titik mulai: ${audioWindows.join(', ')}.`;
+      }
+      const audioStats = await fs.stat(audioPath);
+      if (audioStats.size > 0 && audioStats.size <= INLINE_AUDIO_MAX_BYTES) {
+        audioPart = { inlineData: { mimeType: 'audio/mpeg', data: await fs.readFile(audioPath, 'base64') } };
+      } else if (audioStats.size > INLINE_AUDIO_MAX_BYTES) {
+        geminiAudioFile = await uploadToGemini(audioPath, 'audio/mpeg', config.apiKey);
+        audioPart = { fileData: { fileUri: geminiAudioFile.uri, mimeType: geminiAudioFile.mimeType || 'audio/mpeg' } };
+      }
+    }
+
+    if (!framePaths.length && !audioPart) return res.status(422).json({ error: 'Video tidak berisi audio atau frame yang dapat dianalisis.' });
+    const topic = String(req.body?.topic || '').trim().slice(0, 240);
+    const language = String(req.body?.language || '').trim().slice(0, 80);
+    const filename = String(req.file.originalname || '').replace(/[\u0000-\u001f]/g, '').slice(0, 180);
+    const sampledTimes = framePaths.map((_, index) => {
+      const seconds = Math.min(duration, Math.floor(index / frameFps));
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+    });
+    const prompt = [
+      'Buat metadata SEO YouTube berdasarkan isi video yang benar-benar diberikan: audio hasil ekstraksi dan frame gambar sampel. Frame dikirim setelah teks ini dalam urutan waktu yang tercantum.',
+      'Jadikan audio dan adegan visual sebagai bukti utama. Nama file dan kata kunci pengguna hanya petunjuk sekunder, bukan bukti fakta. Jangan mengarang nama orang, tempat, produk, angka, klaim, atau kejadian. Jika bukti terbatas, gunakan metadata umum yang aman dan tetap relevan.',
+      `Panduan audio: ${audioContext}`,
+      framePaths.length ? `Frame sampel berurutan pada perkiraan waktu: ${sampledTimes.join(', ')}.` : 'Tidak ada frame visual yang berhasil diekstrak.',
+      filename ? `Nama file (petunjuk lemah saja): ${filename}` : '',
+      topic ? `Kata kunci tambahan dari pengguna: ${topic}` : '',
+      language ? `Tulis metadata dalam bahasa ${language}.` : 'Gunakan bahasa yang paling dominan di audio; bila tidak ada ucapan, gunakan bahasa Indonesia.',
+      'Kembalikan hanya JSON valid dengan bentuk {"title":"...","description":"...","tags":["..."]}. Judul maksimal 100 karakter. Deskripsi ringkas, natural, dan faktual. Buat 3 sampai 15 tag relevan tanpa tanda # dan tanpa duplikasi.'
+    ].filter(Boolean).join('\n\n');
+    const parts = [{ text: prompt }];
+    if (audioPart) parts.push(audioPart);
+    for (const framePath of framePaths) parts.push({ inlineData: { mimeType: 'image/jpeg', data: await fs.readFile(framePath, 'base64') } });
+    const result = await geminiRequest(config.model, {
+      contents: [{ parts }],
+      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', maxOutputTokens: 1200 }
+    }, config.apiKey, 120000);
+    const metadata = parseSeoMetadata(responseText(result));
+    const title = String(metadata?.title || '').trim().slice(0, 100);
+    const description = String(metadata?.description || '').trim().slice(0, 5000);
+    const tags = Array.isArray(metadata?.tags) ? [...new Set(metadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean))].slice(0, 30) : [];
+    const tagsWithinLimit = [];
+    let tagsLength = 0;
+    for (const tag of tags) {
+      const nextLength = tagsLength + tag.length + (tagsWithinLimit.length ? 1 : 0);
+      if (nextLength > 500) break;
+      tagsWithinLimit.push(tag);
+      tagsLength = nextLength;
+    }
+    if (!title || !description) return res.status(502).json({ error: 'Gemini belum menghasilkan metadata yang valid dari isi video. Coba lagi.' });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ title, description, tags: tagsWithinLimit });
+  } catch (error) {
+    console.warn('[youtube-seo-video] analysis failed:', error.message || error.name || 'Error');
+    return res.status(error.status || 502).json({ error: error.status === 422 ? error.message : 'Gemini SEO tidak dapat membaca audio/frame video. Periksa model dan kuota Gemini SEO khusus, lalu coba lagi.' });
+  } finally {
+    await cleanup(req.file?.path, audioPath, ...allFramePaths);
+    if (geminiAudioFile?.name) await deleteGeminiFile(geminiAudioFile.name, config?.apiKey);
+  }
 });
 
 app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {

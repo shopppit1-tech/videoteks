@@ -76,10 +76,10 @@
     </section>
     <form id="uploadForm" class="card">
       <h2 class="card-title">Detail video</h2>
-      <p class="muted">Pilih video langsung untuk membuat metadata otomatis dari nama file, atau gunakan subtitle/terjemahan VideoTeks sebagai konteks.</p>
+      <p class="muted">Untuk unggah langsung, Gemini membuat metadata dari audio dan cuplikan gambar isi video. Video dari Subtitle Video memakai teks subtitle/terjemahan sebagai konteks.</p>
       <label class="file-pick" for="videoFile">
         <span class="file-icon" aria-hidden="true">＋</span>
-        <span class="file-copy"><strong>Pilih video dari perangkat</strong><small>File akan dikirim langsung ke akun video yang Anda hubungkan.</small><span id="fileName" class="file-name">Belum ada video dipilih</span></span>
+        <span class="file-copy"><strong>Pilih video dari perangkat</strong><small>Untuk analisis SEO, video diproses sementara di server. File asli dikirim ke YouTube saat Anda menekan Upload.</small><span id="fileName" class="file-name">Belum ada video dipilih</span></span>
       </label>
       <input id="videoFile" class="sr-only" type="file" accept="video/*">
       <p id="handoffHint" class="handoff-hint" hidden></p>
@@ -96,9 +96,10 @@
       <div class="field">
         <label for="seoTopic">Topik atau kata kunci SEO (opsional)</label>
         <input id="seoTopic" class="text single" type="text" maxlength="240" placeholder="Contoh: tips belajar bahasa Inggris">
-        <small id="seoHint">Pilih video langsung untuk membuat judul/deskripsi otomatis dari nama file; subtitle/terjemahan tetap dipakai bila tersedia.</small>
+        <small id="seoHint">Pilih video langsung dan setujui analisis audio/frame agar metadata dibuat dari isi video.</small>
         <button id="seoButton" class="btn secondary seo-button" type="button">Buat judul &amp; deskripsi SEO (Gemini)</button>
-        <small id="seoTagsHint">Tag SEO akan dibuat otomatis dari subtitle/terjemahan.</small>
+        <small id="seoTagsHint">Tag SEO dibuat dari isi video atau teks subtitle/terjemahan.</small>
+        <label class="rights"><input id="seoContentConsent" type="checkbox"><span>Saya setuju video ini diproses sementara di server untuk mengekstrak audio dan frame sampel, lalu hasil ekstraknya dikirim ke Gemini khusus SEO YouTube. Video utuh tidak dikirim ke Gemini dan file sementara dihapus setelah analisis.</span></label>
       </div>
       <div class="field">
         <label for="privacyStatus">Siapa yang dapat menonton?</label>
@@ -108,7 +109,7 @@
           <option value="public">Publik — dapat ditemukan semua orang</option>
         </select>
       </div>
-      <p class="privacy-note">Video, judul, deskripsi, dan pilihan privasi dikirim langsung ke platform video. Pastikan Anda memiliki hak untuk mengunggah konten tersebut. Pilihan publikasi mengikuti setelan privasi yang Anda pilih.</p>
+      <p class="privacy-note">Untuk SEO, video diproses sementara di server untuk mengambil audio dan frame sampel; hanya hasil ekstraksi itu yang dikirim ke Gemini khusus YouTube, bukan video utuh. File sementara dihapus setelah analisis. Video asli, judul, deskripsi, dan pilihan privasi dikirim ke YouTube saat Anda menekan Upload. Pastikan Anda memiliki hak untuk mengunggah konten tersebut.</p>
       <label class="rights"><input id="rightsCheck" type="checkbox"><span>Saya memiliki hak atau izin untuk mengunggah video ini dan bertanggung jawab atas kontennya.</span></label>
       <button id="uploadButton" class="btn upload-btn" type="submit" disabled>Upload ke YouTube</button>
       <div id="progress" class="progress" hidden><div id="progressFill" class="progress-fill"></div></div>
@@ -116,6 +117,6 @@
       <a id="successLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat video yang diunggah</a>
     </form>
   </main>
-  <script type="module" src="youtube.js?v=seo-activate-5"></script>
+  <script type="module" src="youtube.js?v=seo-video-content-1"></script>
 </body>
 </html>

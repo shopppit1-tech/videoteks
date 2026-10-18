@@ -42,6 +42,7 @@ const progressFill = $('#progressFill');
 const successLink = $('#successLink');
 const seoButton = $('#seoButton');
 const seoTopic = $('#seoTopic');
+const seoContentConsent = $('#seoContentConsent');
 let codeClient = null;
 let accessToken = null;
 let selectedFile = null;
@@ -64,11 +65,12 @@ function updateControls() {
   connectButton.disabled = !codeClient || uploading;
   disconnectButton.hidden = !accessToken;
   uploadButton.disabled = uploading || seoBusy || !accessToken || !selectedFile || !titleInput.value.trim() || !rightsCheck.checked;
-  fileInput.disabled = uploading;
+  fileInput.disabled = uploading || seoBusy;
   titleInput.disabled = uploading;
   descriptionInput.disabled = uploading;
   $('#privacyStatus').disabled = uploading;
   rightsCheck.disabled = uploading;
+  seoContentConsent.disabled = uploading || seoBusy;
   // Tombol tetap aktif; jika AI belum siap, tampilkan error dari server saat ditekan.
   seoButton.disabled = uploading || seoBusy;
 }
@@ -262,7 +264,7 @@ async function initializeSeo() {
       const status = await apiRequest('/api/youtube/seo-status', { method: 'GET' });
       seoAiConfigured = Boolean(status.configured);
       $('#seoHint').textContent = seoAiConfigured
-        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Pilih video langsung untuk membuat metadata otomatis dari nama file; subtitle tetap dipakai bila tersedia.`
+        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Untuk unggah langsung, setujui analisis audio dan frame agar metadata dibuat dari isi video; subtitle tetap dipakai bila tersedia.`
         : 'Isi GEMINI_YOUTUBE_API_KEY khusus SEO YouTube di Render; key terjemahan tidak dipakai.';
       updateControls();
       void maybeGenerateSeoMetadata();
@@ -336,6 +338,7 @@ fileInput.addEventListener('change', () => {
   if (!loadingHandoff) {
     sourceCaptions = '';
     sourceLanguage = '';
+    seoContentConsent.checked = false;
     $('#handoffHint').hidden = true;
   }
   if (!selectedFile) {
@@ -372,26 +375,37 @@ descriptionInput.addEventListener('input', () => {
 
 async function generateSeoMetadata() {
   if (seoBusy || uploading) return;
-  const topic = seoTopic.value.trim() || (!sourceCaptions.trim()
+  const analyzeVideo = Boolean(selectedFile && !sourceCaptions.trim());
+  if (analyzeVideo && !seoContentConsent.checked) {
+    setStatus('Centang persetujuan analisis audio dan cuplikan gambar agar Gemini membuat SEO dari isi video.', true);
+    return;
+  }
+  const topic = seoTopic.value.trim() || (!sourceCaptions.trim() && !analyzeVideo
     ? (selectedFile?.name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
     : '');
-  if (!sourceCaptions.trim() && !topic) {
+  if (!sourceCaptions.trim() && !topic && !analyzeVideo) {
     setStatus('Pilih video atau masukkan topik SEO agar Gemini memiliki konteks.', true);
     return;
   }
   seoBusy = true;
-  seoButton.textContent = 'Gemini sedang membuat…';
-  setStatus('AI SEO sedang menyiapkan judul, deskripsi, dan tag…');
+  seoButton.textContent = analyzeVideo ? 'Gemini membaca video…' : 'Gemini sedang membuat…';
+  setStatus(analyzeVideo ? 'Gemini sedang membaca audio dan cuplikan gambar video…' : 'AI SEO sedang menyiapkan judul, deskripsi, dan tag…');
   updateControls();
   try {
-    const data = await apiRequest('/api/youtube/seo-metadata', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const body = analyzeVideo ? new FormData() : JSON.stringify({
         captions: sourceCaptions,
         language: sourceLanguage,
         topic
-      })
+      });
+    if (analyzeVideo) {
+      body.append('video', selectedFile, selectedFile.name);
+      body.append('consent', 'true');
+      body.append('topic', seoTopic.value.trim());
+    }
+    const data = await apiRequest(analyzeVideo ? '/api/youtube/seo-video-metadata' : '/api/youtube/seo-metadata', {
+      method: 'POST',
+      ...(analyzeVideo ? {} : { headers: { 'Content-Type': 'application/json' } }),
+      body
     });
     titleInput.value = String(data.title || '').slice(0, 100);
     descriptionInput.value = String(data.description || '').slice(0, 5000);
@@ -413,11 +427,16 @@ async function generateSeoMetadata() {
 
 async function maybeGenerateSeoMetadata() {
   if (seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim() && !selectedFile)) return;
+  if (selectedFile && !sourceCaptions.trim() && !seoContentConsent.checked) {
+    setStatus('Centang persetujuan analisis isi video untuk membuat judul dan deskripsi SEO otomatis.');
+    return;
+  }
   seoGenerationPromise = generateSeoMetadata();
   try { await seoGenerationPromise; } finally { seoGenerationPromise = null; }
 }
 
 seoButton.addEventListener('click', () => { void generateSeoMetadata(); });
+seoContentConsent.addEventListener('change', () => { if (seoContentConsent.checked) void maybeGenerateSeoMetadata(); });
 
 rightsCheck.addEventListener('change', updateControls);
 
