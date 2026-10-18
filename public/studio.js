@@ -67,8 +67,8 @@ function navigate(route, params = new URLSearchParams(), { writeHistory = false,
   const cleanParams = new URLSearchParams(params);
   cleanParams.delete('view');
 
-  if (route === 'app') {
-    const standaloneUrl = new URL(ROUTES.app.file, APP_BASE);
+  if (route === 'app' || route === 'audio' || route === 'voice') {
+    const standaloneUrl = new URL(ROUTES[route].file, APP_BASE);
     for (const [key, value] of cleanParams.entries()) standaloneUrl.searchParams.append(key, value);
     standaloneUrl.searchParams.set('standalone', '1');
     standaloneUrl.hash = hash;
@@ -98,9 +98,7 @@ function navigate(route, params = new URLSearchParams(), { writeHistory = false,
   frame.hidden = true;
   frame.loading = 'eager';
   frame.allow = 'autoplay; clipboard-write';
-  const shellScrollRoute = route === 'audio' || route === 'voice';
-  frame.setAttribute('scrolling', shellScrollRoute ? 'no' : 'yes');
-  if (shellScrollRoute) frame.dataset.scrollMode = 'shell';
+  frame.setAttribute('scrolling', 'yes');
   frame.referrerPolicy = 'strict-origin-when-cross-origin';
   frame.addEventListener('load', () => {
     frame.dataset.ready = 'true';
@@ -149,16 +147,6 @@ window.addEventListener('message', (event) => {
 
   if (event.data.type === 'signed-out') {
     location.replace(new URL('index.html', APP_BASE).href);
-    return;
-  }
-  if (event.data.type === 'frame-size') {
-    const route = [...frames.entries()].find(([, frame]) => frame === sourceFrame)?.[0];
-    if (route !== 'audio' && route !== 'voice') return;
-    const height = Number(event.data.height);
-    if (!Number.isFinite(height) || height <= 0) return;
-    const nextHeight = Math.max(Math.ceil(window.innerHeight), Math.ceil(height));
-    const currentHeight = Math.ceil(sourceFrame.getBoundingClientRect().height);
-    if (Math.abs(nextHeight - currentHeight) > 1) sourceFrame.style.height = `${nextHeight}px`;
     return;
   }
   if (event.data.type === 'auth-required') {
