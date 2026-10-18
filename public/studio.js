@@ -98,6 +98,7 @@ function navigate(route, params = new URLSearchParams(), { writeHistory = false,
   frame.hidden = true;
   frame.loading = 'eager';
   frame.allow = 'autoplay; clipboard-write';
+  frame.setAttribute('scrolling', 'yes');
   frame.referrerPolicy = 'strict-origin-when-cross-origin';
   frame.addEventListener('load', () => {
     frame.dataset.ready = 'true';
