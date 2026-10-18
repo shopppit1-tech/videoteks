@@ -95,11 +95,14 @@
       </div>
       <small id="seoTagsHint" class="muted"></small>
       <input id="seoContentConsent" type="checkbox" checked hidden>
-      <select id="privacyStatus" class="select" hidden aria-hidden="true">
-        <option value="private" selected>Privat — hanya Anda</option>
-        <option value="unlisted">Tidak publik — hanya yang memiliki tautan</option>
-        <option value="public">Publik — dapat ditemukan semua orang</option>
-      </select>
+      <div class="field">
+        <label for="privacyStatus">Visibilitas video</label>
+        <select id="privacyStatus" class="select">
+          <option value="private" selected>Privat — hanya Anda</option>
+          <option value="unlisted">Tidak publik — hanya yang memiliki tautan</option>
+          <option value="public">Publik — dapat ditemukan semua orang</option>
+        </select>
+      </div>
       <input id="rightsCheck" type="checkbox" checked hidden>
       <button id="uploadButton" class="btn upload-btn" type="submit" disabled>Upload ke YouTube</button>
       <div id="progress" class="progress" hidden><div id="progressFill" class="progress-fill"></div></div>

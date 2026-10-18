@@ -285,29 +285,29 @@ async function initializeSeo() {
 
 async function loadHandoffVideo() {
   if (new URLSearchParams(location.search).get('handoff') !== 'latest') return;
+  loadingHandoff = true;
   try {
     const record = await loadYoutubeHandoff();
     if (!record?.blob) throw new Error('Hasil video belum ditemukan. Kembali ke halaman Subtitle Video dan ekspor hasil terlebih dahulu.');
     const file = new File([record.blob], record.name || 'videoteks-subtitle.mp4', { type: record.blob.type || 'video/mp4' });
     const transfer = new DataTransfer();
     transfer.items.add(file);
-    loadingHandoff = true;
     fileInput.files = transfer.files;
     fileInput.dispatchEvent(new Event('change'));
-    loadingHandoff = false;
     sourceCaptions = String(record.captions || '');
     sourceLanguage = String(record.language || '');
     $('#handoffHint').textContent = sourceLanguage
       ? `Video hasil subtitle/terjemahan (${sourceLanguage}) dimasukkan otomatis.`
       : 'Video hasil subtitle dimasukkan otomatis.';
     $('#handoffHint').hidden = false;
-    void maybeGenerateSeoMetadata();
   } catch (error) {
-    loadingHandoff = false;
     $('#handoffHint').textContent = error.message || 'Hasil video tidak dapat dimuat.';
     $('#handoffHint').hidden = false;
+  } finally {
+    loadingHandoff = false;
+    updateControls();
   }
-  updateControls();
+  if (selectedFile) void maybeGenerateSeoMetadata();
 }
 
 connectButton.addEventListener('click', () => {
@@ -430,7 +430,7 @@ async function generateSeoMetadata() {
 }
 
 async function maybeGenerateSeoMetadata() {
-  if (seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim() && !selectedFile)) return;
+  if (loadingHandoff || seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim() && !selectedFile)) return;
   if (selectedFile && !sourceCaptions.trim() && !seoContentConsent.checked) {
     setStatus('Centang persetujuan analisis isi video untuk membuat judul dan deskripsi SEO otomatis.');
     return;

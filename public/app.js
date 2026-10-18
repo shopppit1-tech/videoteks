@@ -125,6 +125,7 @@ $('#clearCaption').onclick = () => { caption.value = ''; syncCaption(); schedule
 fileInput.onchange = (event) => {
   state.file = event.target.files[0];
   if (!state.file) return;
+  $('#youtubeHandoffLink').hidden = true;
   currentHistoryId = null;
   clearTimeout(historySaveTimer);
   state.segments = [];
@@ -217,7 +218,21 @@ $('#translateBtn').onclick = async () => {
     drawSegments();
     syncCaption();
     scheduleHistorySave();
-    setStatus(data.historySaved ? `Terjemahan ${target} siap. Riwayat diperbarui.` : `Terjemahan ${target} siap.`);
+    try {
+      if (!state.file) throw new Error('Video sumber tidak tersedia.');
+      await saveYoutubeHandoff(state.file, {
+        name: state.file.name || 'video-terjemahan.mp4',
+        captions: state.segments.map((segment) => segment.text).join('\n'),
+        language: target
+      });
+      $('#youtubeHandoffLink').hidden = false;
+      setStatus(data.historySaved
+        ? `Terjemahan ${target} siap. Video dan subtitle bisa diteruskan ke YouTube. Riwayat diperbarui.`
+        : `Terjemahan ${target} siap. Video dan subtitle bisa diteruskan ke YouTube.`);
+    } catch (handoffError) {
+      $('#youtubeHandoffLink').hidden = true;
+      setStatus(`Terjemahan ${target} siap, tetapi video belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
+    }
   } catch (error) {
     setStatus(error.message || 'Terjemahan gagal dibuat.', true);
   } finally {

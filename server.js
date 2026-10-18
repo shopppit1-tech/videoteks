@@ -280,8 +280,9 @@ function coolDownGeminiKeyAfterFailure(apiKey, error) {
   rotateGeminiKeyAfter(apiKey);
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000) {
+async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2) {
   const models = [model || 'gemini-3.8-flash'];
+  const attempts = Math.max(1, Math.floor(Number(maxAttempts) || 2));
   let lastError;
   while (true) {
     const keys = fixedKey ? [fixedKey] : geminiKeysInRotation();
@@ -293,7 +294,7 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000) {
     for (const apiKey of keys) {
       let keyQuotaExhausted = false;
       for (const activeModel of models) {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
           let r;
           try {
             r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent`, {
@@ -302,7 +303,7 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000) {
           } catch (error) {
             lastError = new Error(error.name === 'TimeoutError' ? `Gemini request timeout setelah ${Math.round(timeoutMs / 1000)} detik.` : `Gemini request gagal: ${error.message}`);
             lastError.status = 503;
-            if (attempt === 1) { coolDownGeminiKeyAfterFailure(apiKey, lastError); break; }
+            if (attempt === attempts - 1) { coolDownGeminiKeyAfterFailure(apiKey, lastError); break; }
             await sleep(1200 * (attempt + 1));
             continue;
           }
@@ -326,8 +327,8 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000) {
             keyQuotaExhausted = true;
             break;
           }
-          if (attempt === 1) coolDownGeminiKeyAfterFailure(apiKey, lastError);
-          if (attempt === 1) break;
+          if (attempt === attempts - 1) coolDownGeminiKeyAfterFailure(apiKey, lastError);
+          if (attempt === attempts - 1) break;
           await sleep(1200 * (attempt + 1));
         }
         if (keyQuotaExhausted) break;
@@ -860,11 +861,12 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
     captions ? `Subtitle/konteks video (sumber utama untuk fakta):\n${captions}` : '',
     'Kembalikan hanya JSON valid dengan tiga properti: {"title":"...","description":"...","tags":["..."]}. Pastikan title berupa hook yang kuat, description lengkap, dan tags berisi 15–25 tag selama tetap memenuhi batas 500 karakter.'
   ].filter(Boolean).join('\n\n');
+  const seoStartedAt = Date.now();
   try {
     const result = await geminiRequest(config.model, {
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.55, responseMimeType: 'application/json', maxOutputTokens: 1800 }
-    }, config.apiKey);
+      generationConfig: { temperature: 0.45, responseMimeType: 'application/json', maxOutputTokens: 900 }
+    }, config.apiKey, 60000, 1);
     const text = result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
     const metadata = parseSeoMetadata(text);
     const title = String(metadata?.title || '').trim().slice(0, 100);
@@ -872,9 +874,10 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
     const tagsWithinLimit = normalizeSeoTags(metadata?.tags);
     if (!title || !description) return res.status(502).json({ error: 'Gemini tidak mengembalikan judul dan deskripsi. Coba lagi.' });
     res.set('Cache-Control', 'no-store');
+    console.info(`[youtube-seo] metadata generated in ${Date.now() - seoStartedAt}ms`);
     res.json({ title, description, tags: tagsWithinLimit });
   } catch (error) {
-    console.warn('[youtube-seo] Gemini request failed:', error.message || error.name || 'Error');
+    console.warn(`[youtube-seo] Gemini request failed after ${Date.now() - seoStartedAt}ms:`, error.message || error.name || 'Error');
     res.status(502).json({ error: 'Gemini tidak dapat membuat judul dan deskripsi. Periksa API key, model, kuota, lalu coba lagi.' });
   }
 });
