@@ -37,12 +37,53 @@ const audioResult = $('#audioResult');
 const downloadLink = $('#downloadLink');
 const audioHandoff = $('#audioHandoff');
 const status = $('#status');
+const videoInput = $('#narrationVideo');
+const videoConsent = $('#videoConsent');
+const videoInfo = $('#videoInfo');
+const videoNarrationBtn = $('#videoNarrationBtn');
+const videoStatus = $('#videoStatus');
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 let audioUrl = null;
+let metadataUrl = null;
+let selectedVideoDuration = null;
 let busy = false;
+let videoBusy = false;
 
-downloadLink.addEventListener('click', () => {
-  downloadLink.download = downloadName('suara-ai', '.wav');
-});
+function setStatus(message, error = false) {
+  status.textContent = message;
+  status.className = `status ${error ? 'error' : ''}`;
+}
+
+function setVideoStatus(message, error = false) {
+  videoStatus.textContent = message;
+  videoStatus.className = `status ${error ? 'error' : ''}`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'durasi belum diketahui';
+  const total = Math.round(seconds);
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return minutes ? `${minutes} menit ${remainder} detik` : `${remainder} detik`;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+
+function updateVideoControls() {
+  const file = videoInput.files?.[0];
+  videoNarrationBtn.disabled = busy || videoBusy || !file || !videoConsent.checked || file.size > MAX_VIDEO_BYTES;
+  generateBtn.disabled = busy || videoBusy || !textInput.value.trim();
+}
+
+function updateCount() {
+  count.textContent = textInput.value.length.toLocaleString('id-ID');
+  updateVideoControls();
+}
 
 function saveAudioForHandoff(blob) {
   return new Promise((resolve, reject) => {
@@ -59,21 +100,11 @@ function saveAudioForHandoff(blob) {
   });
 }
 
-function setStatus(message, error = false) {
-  status.textContent = message;
-  status.className = `status ${error ? 'error' : ''}`;
-}
-function updateCount() {
-  count.textContent = textInput.value.length.toLocaleString('id-ID');
-  generateBtn.disabled = busy || !textInput.value.trim();
-}
-textInput.addEventListener('input', updateCount);
-
-generateBtn.onclick = async () => {
-  const text = textInput.value.trim();
-  if (!text || busy) return;
+async function createVoice(textValue) {
+  const text = String(textValue || '').trim();
+  if (!text || busy) return false;
   busy = true;
-  updateCount();
+  updateVideoControls();
   result.hidden = true;
   generateBtn.textContent = 'Membuat suara...';
   setStatus('Sedang membuat audio...');
@@ -84,7 +115,8 @@ generateBtn.onclick = async () => {
       body: JSON.stringify({ text, voice: voiceSelect.value, style: styleInput.value })
     });
     if (!response.ok) {
-      throw new Error('Audio tidak dapat dibuat. Coba lagi sebentar lagi.');
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Audio tidak dapat dibuat. Coba lagi sebentar lagi.');
     }
     const blob = await response.blob();
     if (audioUrl) URL.revokeObjectURL(audioUrl);
@@ -96,12 +128,95 @@ generateBtn.onclick = async () => {
     result.hidden = false;
     const historyStatus = response.headers.get('X-History-Saved') === 'true' ? 'Riwayat tersimpan.' : 'Riwayat belum tersimpan.';
     setStatus(`Selesai. Audio siap diputar atau diunduh. ${historyStatus}`);
+    return true;
   } catch (error) {
     setStatus(error.message, true);
+    return false;
   } finally {
     busy = false;
     generateBtn.textContent = 'Buat suara AI';
-    updateCount();
+    updateVideoControls();
   }
-};
+}
+
+downloadLink.addEventListener('click', () => {
+  downloadLink.download = downloadName('suara-ai', '.wav');
+});
+textInput.addEventListener('input', updateCount);
+generateBtn.addEventListener('click', () => createVoice(textInput.value));
+
+videoInput.addEventListener('change', () => {
+  if (metadataUrl) URL.revokeObjectURL(metadataUrl);
+  metadataUrl = null;
+  selectedVideoDuration = null;
+  const file = videoInput.files?.[0];
+  if (!file) {
+    videoInfo.textContent = 'Belum ada video dipilih.';
+    setVideoStatus('Pilih video dan setujui analisis untuk mulai.');
+    updateVideoControls();
+    return;
+  }
+  videoInfo.textContent = `${file.name} · ${formatBytes(file.size)} · memeriksa durasi…`;
+  if (file.size > MAX_VIDEO_BYTES) {
+    videoInfo.textContent = `${file.name} · ${formatBytes(file.size)}`;
+    setVideoStatus('Ukuran video maksimal 500 MB.', true);
+  } else {
+    setVideoStatus('Video dipilih. Centang persetujuan untuk mulai.');
+    metadataUrl = URL.createObjectURL(file);
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.onloadedmetadata = () => {
+      selectedVideoDuration = Number.isFinite(probe.duration) ? probe.duration : null;
+      videoInfo.textContent = `${file.name} · ${formatBytes(file.size)} · ${formatDuration(selectedVideoDuration)}`;
+      if (metadataUrl) URL.revokeObjectURL(metadataUrl);
+      metadataUrl = null;
+    };
+    probe.onerror = () => {
+      videoInfo.textContent = `${file.name} · ${formatBytes(file.size)} · durasi diperiksa server`;
+      if (metadataUrl) URL.revokeObjectURL(metadataUrl);
+      metadataUrl = null;
+    };
+    probe.src = metadataUrl;
+  }
+  updateVideoControls();
+});
+videoConsent.addEventListener('change', updateVideoControls);
+
+videoNarrationBtn.addEventListener('click', async () => {
+  const file = videoInput.files?.[0];
+  if (!file || !videoConsent.checked || videoBusy || busy) return;
+  if (file.size > MAX_VIDEO_BYTES) {
+    setVideoStatus('Ukuran video maksimal 500 MB.', true);
+    return;
+  }
+  videoBusy = true;
+  videoNarrationBtn.textContent = 'Menganalisis video…';
+  updateVideoControls();
+  setVideoStatus('Menganalisis audio dan cuplikan video. Mohon tunggu…');
+  try {
+    const formData = new FormData();
+    formData.append('video', file);
+    formData.append('consent', 'true');
+    const response = await authenticatedFetch('/api/voice/video-narration', { method: 'POST', body: formData });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Narasi dari video gagal dibuat.');
+    const narration = String(data.narration || '').trim();
+    if (!narration) throw new Error('AI tidak mengembalikan teks narasi. Coba lagi.');
+    textInput.value = narration;
+    updateCount();
+    const duration = Number.isFinite(Number(data.durationSeconds)) ? Number(data.durationSeconds) : selectedVideoDuration;
+    setVideoStatus(`Narasi untuk video ${formatDuration(duration)} selesai. Membuat suara otomatis…`);
+    const voiceCreated = await createVoice(narration);
+    setVideoStatus(voiceCreated
+      ? 'Selesai. Naskah ada di kolom Teks narasi dan suara siap diputar atau diunduh.'
+      : 'Naskah sudah dibuat. Pembuatan suara gagal; lihat pesan pada bagian Teks narasi.', !voiceCreated);
+  } catch (error) {
+    setVideoStatus(error.message, true);
+  } finally {
+    videoBusy = false;
+    videoNarrationBtn.textContent = 'Buat narasi + suara otomatis';
+    updateVideoControls();
+  }
+});
+
 updateCount();
