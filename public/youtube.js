@@ -262,7 +262,7 @@ async function initializeSeo() {
       const status = await apiRequest('/api/youtube/seo-status', { method: 'GET' });
       seoAiConfigured = Boolean(status.configured);
       $('#seoHint').textContent = seoAiConfigured
-        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Subtitle/narasi diteruskan sebagai konteks.`
+        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Gunakan subtitle/narasi, topik, atau nama file sebagai konteks.`
         : 'Isi GEMINI_YOUTUBE_API_KEY di Render untuk mengaktifkan AI judul dan deskripsi.';
       updateControls();
       void maybeGenerateSeoMetadata();
@@ -371,8 +371,15 @@ descriptionInput.addEventListener('input', () => {
 
 async function generateSeoMetadata() {
   if (seoBusy || uploading) return;
+  const topic = seoTopic.value.trim() || (!sourceCaptions.trim()
+    ? (selectedFile?.name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+    : '');
+  if (!sourceCaptions.trim() && !topic) {
+    setStatus('Pilih video atau masukkan topik SEO agar Gemini memiliki konteks.', true);
+    return;
+  }
   seoBusy = true;
-  seoButton.textContent = 'Membuat metadata…';
+  seoButton.textContent = 'Gemini sedang membuat…';
   setStatus('AI SEO sedang menyiapkan judul, deskripsi, dan tag…');
   updateControls();
   try {
@@ -382,7 +389,7 @@ async function generateSeoMetadata() {
       body: JSON.stringify({
         captions: sourceCaptions,
         language: sourceLanguage,
-        topic: seoTopic.value.trim()
+        topic
       })
     });
     titleInput.value = String(data.title || '').slice(0, 100);
@@ -398,7 +405,7 @@ async function generateSeoMetadata() {
     setStatus(error.message || 'AI SEO gagal membuat metadata.', true);
   } finally {
     seoBusy = false;
-    seoButton.textContent = 'Buat ulang metadata AI';
+    seoButton.textContent = 'Buat judul & deskripsi SEO (Gemini)';
     updateControls();
   }
 }
