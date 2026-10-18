@@ -3,6 +3,29 @@ import { downloadName } from './download-utils.js';
 
 await requireLogin();
 
+// Fallback for Android/PWA webviews that swallow native page scrolling.
+let touchStartX = 0;
+let touchStartY = 0;
+document.addEventListener('touchstart', (event) => {
+  if (event.touches.length !== 1) return;
+  touchStartX = event.touches[0].clientX;
+  touchStartY = event.touches[0].clientY;
+}, { passive: true });
+document.addEventListener('touchmove', (event) => {
+  if (event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  const deltaX = touch.clientX - touchStartX;
+  const deltaY = touchStartY - touch.clientY;
+  if (Math.abs(deltaY) <= Math.abs(deltaX) || Math.abs(deltaY) < 1) return;
+  const scroller = document.scrollingElement || document.documentElement;
+  const before = scroller.scrollTop;
+  const maximum = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  scroller.scrollTop = Math.max(0, Math.min(maximum, before + deltaY));
+  if (scroller.scrollTop !== before) event.preventDefault();
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+}, { passive: false });
+
 const $ = (selector) => document.querySelector(selector);
 const textInput = $('#textInput');
 const voiceSelect = $('#voiceSelect');
