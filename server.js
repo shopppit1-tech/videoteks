@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { createAutoUploadMediaPipeline } from './auto-upload-media-pipeline.js';
 
 const exec = promisify(execFile);
 const app = express();
@@ -21,6 +22,7 @@ const FIREBASE_PROJECT_ID = 'videoteks-a82c1';
 const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || 'https://shopppit1-tech.github.io';
 let firebaseAdminAuth = null;
 let firebaseDb = null;
+let autoUploadMediaPipeline = null;
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
@@ -207,6 +209,7 @@ const GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
 const AUTO_UPLOAD_REPO = 'shopppit1-tech/videoteks';
 const AUTO_UPLOAD_WORKFLOW = `${AUTO_UPLOAD_REPO}/.github/workflows/youtube-auto-upload.yml@refs/heads/main`;
 const AUTO_UPLOAD_OIDC_AUDIENCE = 'videoteks-youtube-daily-upload';
+const AUTO_UPLOAD_PIPELINE_VERSION = 'drive-voice-subtitles-v1';
 let githubOidcJwks = { expiresAt: 0, keys: [] };
 
 function googleDriveFolderId(value) {
@@ -379,18 +382,22 @@ async function processOneAutoUpload(jobSnapshot) {
     const snapshot = await transaction.get(jobRef);
     const current = snapshot.data() || {};
     if (!snapshot.exists || !current.enabled) return { status: 'disabled' };
+    if (current.pipelineVersion !== AUTO_UPLOAD_PIPELINE_VERSION) return { status: 'needs_confirmation' };
     if (current.lastUploadDate === today) return { status: 'already_uploaded' };
     if (Number(current.processingUntil || 0) > now) return { status: 'busy' };
-    transaction.set(jobRef, { processing: true, processingStartedAt: now, processingUntil: now + 45 * 60 * 1000, leaseId, updatedAt: now }, { merge: true });
+    transaction.set(jobRef, { processing: true, processingStartedAt: now, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
     return { status: 'claimed', settings: current };
   });
   if (claim.status !== 'claimed') return { status: claim.status };
   let videoPath = null;
+  let pipelineResult = null;
   try {
     const config = youtubeOAuthConfig();
     const seoConfig = youtubeSeoAIConfig();
     if (!config) throw new Error('Integrasi Google OAuth belum dikonfigurasi di server.');
     if (!seoConfig) throw new Error('Gemini SEO YouTube belum dikonfigurasi di server.');
+    if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2 && !process.env.GEMINI_API_KEY_3) throw new Error('GEMINI_API_KEY untuk membuat narasi dan subtitle belum dikonfigurasi di server.');
+    if (!process.env.GEMINI_TTS_API_KEY) throw new Error('GEMINI_TTS_API_KEY untuk membuat suara AI belum dikonfigurasi di server.');
     const folderId = googleDriveFolderId(claim.settings.folderId);
     if (!folderId) throw new Error('Folder Drive pada antrean tidak valid.');
     const [driveAccessToken, youtubeAccessToken] = await Promise.all([
@@ -399,13 +406,16 @@ async function processOneAutoUpload(jobSnapshot) {
     ]);
     const file = await findNextDriveVideo(driveAccessToken, folderId, jobRef);
     if (!file) {
-      await jobRef.set({ processing: false, processingUntil: 0, status: 'empty', lastCheckedAt: Date.now(), lastError: '', updatedAt: Date.now() }, { merge: true });
+      await jobRef.set({ processing: false, processingUntil: 0, processingStage: '', status: 'empty', lastCheckedAt: Date.now(), lastError: '', updatedAt: Date.now() }, { merge: true });
       return { status: 'empty' };
     }
     if (!/^[A-Za-z0-9_-]+$/.test(file.id)) throw new Error('ID video Drive tidak valid.');
     videoPath = await downloadGoogleDriveVideo(driveAccessToken, file);
-    const metadata = await generateYoutubeSeoFromFile(videoPath, file.name, '', '', seoConfig);
-    const uploaded = await uploadVideoToYoutube(youtubeAccessToken, videoPath, file, {
+    pipelineResult = await autoUploadMediaPipeline(videoPath, (stage) => setAutoUploadStage(jobRef, leaseId, stage));
+    await setAutoUploadStage(jobRef, leaseId, 'metadata');
+    const metadata = await generateYoutubeSeoFromFile(pipelineResult.finalVideoPath, file.name, '', 'Indonesian', seoConfig);
+    await setAutoUploadStage(jobRef, leaseId, 'uploading');
+    const uploaded = await uploadVideoToYoutube(youtubeAccessToken, pipelineResult.finalVideoPath, { ...file, mimeType: 'video/mp4' }, {
       snippet: { title: metadata.title, description: metadata.description, ...(metadata.tags.length ? { tags: metadata.tags } : {}) },
       status: { privacyStatus: 'public' }
     });
@@ -416,18 +426,25 @@ async function processOneAutoUpload(jobSnapshot) {
       if (processedSnapshot.exists) throw new Error('Video Drive ini sudah pernah ditandai selesai.');
       const completedAt = Date.now();
       transaction.set(processedRef, { driveFileId: file.id, fileName: String(file.name || '').slice(0, 180), youtubeVideoId: uploaded.id, title: metadata.title, uploadedAt: completedAt, uploadDate: today });
-      transaction.set(jobRef, { processing: false, processingUntil: 0, leaseId: '', status: 'uploaded', lastUploadDate: today, lastUploadedAt: completedAt, lastFileName: String(file.name || '').slice(0, 180), lastTitle: metadata.title, lastVideoId: uploaded.id, lastError: '', updatedAt: completedAt }, { merge: true });
+      transaction.set(jobRef, { processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'uploaded', lastUploadDate: today, lastUploadedAt: completedAt, lastFileName: String(file.name || '').slice(0, 180), lastTitle: metadata.title, lastVideoId: uploaded.id, lastError: '', updatedAt: completedAt }, { merge: true });
     });
     return { status: 'uploaded' };
   } catch (error) {
     console.error('[youtube-auto-upload] job failed:', error.message || error.name || 'Error');
     await jobRef.get().then((snapshot) => {
-      if (snapshot.data()?.leaseId === leaseId) return jobRef.set({ processing: false, processingUntil: 0, leaseId: '', status: 'error', lastError: String(error.message || 'Unggah otomatis gagal.').slice(0, 500), lastAttemptAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+      if (snapshot.data()?.leaseId === leaseId) return jobRef.set({ processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'error', lastError: String(error.message || 'Unggah otomatis gagal.').slice(0, 500), lastAttemptAt: Date.now(), updatedAt: Date.now() }, { merge: true });
     }).catch(() => {});
     return { status: 'error' };
   } finally {
     if (videoPath) await fs.rm(videoPath, { force: true }).catch(() => {});
+    if (pipelineResult?.cleanupPaths) await cleanup(...pipelineResult.cleanupPaths);
   }
+}
+
+async function setAutoUploadStage(jobRef, leaseId, processingStage) {
+  const snapshot = await jobRef.get();
+  if (snapshot.data()?.leaseId !== leaseId) throw new Error('Antrean berubah saat pemrosesan berjalan; hentikan agar tidak ada unggahan ganda.');
+  await jobRef.set({ processingStage, updatedAt: Date.now() }, { merge: true });
 }
 
 function historyFailureMessage(error, action) {
@@ -668,6 +685,24 @@ function subtitleStyle(settings) {
 }
 async function cleanup(...files) { await Promise.all(files.filter(Boolean).map(f => fs.rm(f, { force: true }).catch(() => {}))); }
 function responseText(data) { return data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || ''; }
+
+autoUploadMediaPipeline = createAutoUploadMediaPipeline({
+  exec,
+  geminiRequest,
+  responseText,
+  jsonPart,
+  model: MODEL,
+  inlineAudioMaxBytes: INLINE_AUDIO_MAX_BYTES,
+  geminiKeysInRotation,
+  rotateGeminiKeyAfter,
+  coolDownGeminiKeyAfterFailure,
+  isGeminiRetryableError,
+  geminiKeyWaitMessage,
+  uploadToGemini,
+  deleteGeminiFile,
+  toSrt,
+  subtitleStyle
+});
 
 app.get('/api/health', (_req, res) => res.json({
   ok: true,
@@ -1395,12 +1430,13 @@ app.get('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
     const job = jobSnapshot.data() || {};
     res.set('Cache-Control', 'no-store');
     res.json({
-      enabled: Boolean(job.enabled),
+      enabled: Boolean(job.enabled && job.pipelineVersion === AUTO_UPLOAD_PIPELINE_VERSION),
       folderId: job.folderId || '',
       folderName: job.folderName || '',
       connectedDrive: Boolean(driveSnapshot.data()?.refreshTokenEncrypted),
       connectedYoutube: Boolean(youtubeSnapshot.data()?.refreshTokenEncrypted),
-      status: job.status || 'off',
+      status: job.enabled && job.pipelineVersion !== AUTO_UPLOAD_PIPELINE_VERSION ? 'needs-confirmation' : (job.status || 'off'),
+      processingStage: job.processingStage || '',
       lastError: job.lastError || '',
       lastUploadedAt: job.lastUploadedAt || null,
       lastFileName: job.lastFileName || '',
@@ -1430,6 +1466,8 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
     if (enabled) {
       if (!config) return res.status(503).json({ error: 'Integrasi Google belum dikonfigurasi di server.' });
       if (!youtubeSeoAIConfig()) return res.status(503).json({ error: 'Gemini SEO YouTube belum siap. Periksa key dan kuota sebelum mengaktifkan upload otomatis.' });
+      if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2 && !process.env.GEMINI_API_KEY_3) return res.status(503).json({ error: 'Gemini untuk membuat narasi dan subtitle belum dikonfigurasi di server.' });
+      if (!process.env.GEMINI_TTS_API_KEY) return res.status(503).json({ error: 'Gemini Suara AI belum dikonfigurasi di server.' });
       const [driveSnapshot, youtubeSnapshot] = await Promise.all([googleDriveIntegrationRef(uid).get(), youtubeIntegrationRef(uid).get()]);
       if (!driveSnapshot.data()?.refreshTokenEncrypted) return res.status(409).json({ error: 'Hubungkan Google Drive terlebih dahulu.' });
       if (!youtubeSnapshot.data()?.refreshTokenEncrypted) return res.status(409).json({ error: 'Hubungkan akun YouTube terlebih dahulu.' });
@@ -1442,6 +1480,7 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
       folderId: folderId || '',
       folderName,
       enabled,
+      pipelineVersion: AUTO_UPLOAD_PIPELINE_VERSION,
       scheduleTime: '10:05',
       timeZone: 'Asia/Jakarta',
       privacyStatus: 'public',
