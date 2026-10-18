@@ -68,6 +68,25 @@ if (window.ResizeObserver) new ResizeObserver(reportFrameSize).observe(document.
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    if (hadController) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        const hasSelectedFile = [...document.querySelectorAll('input[type="file"]')].some((input) => input.files?.length);
+        const hasEditedField = [...document.querySelectorAll('input, textarea, select')].some((field) => {
+          if (field.disabled || field.hidden || field.type === 'hidden' || field.closest('[hidden]')) return false;
+          if (field.type === 'checkbox' || field.type === 'radio') return field.checked !== field.defaultChecked;
+          if (field instanceof HTMLSelectElement) return [...field.options].some((option) => option.selected !== option.defaultSelected);
+          return field.value !== field.defaultValue;
+        });
+        if (!hasSelectedFile && !hasEditedField && !document.querySelector('.progress:not([hidden])')) location.reload();
+      }, { once: true });
+    }
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((registration) => {
+      const checkForUpdate = () => {
+        if (document.visibilityState === 'visible') void registration.update().catch(() => {});
+      };
+      void registration.update().catch(() => {});
+      document.addEventListener('visibilitychange', checkForUpdate);
+    }).catch(() => {});
   });
 }

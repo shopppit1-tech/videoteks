@@ -50,7 +50,36 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
   return next();
 });
-app.use(express.static(path.join(process.cwd(), 'public')));
+const PUBLIC_DIR = path.join(process.cwd(), 'public');
+async function getPublicBuildVersion(directory) {
+  const hash = crypto.createHash('sha256');
+  async function addDirectory(current) {
+    const entries = await fs.readdir(current, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const filePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        await addDirectory(filePath);
+      } else if (entry.isFile()) {
+        hash.update(path.relative(directory, filePath).split(path.sep).join('/'));
+        hash.update(await fs.readFile(filePath));
+      }
+    }
+  }
+  await addDirectory(directory);
+  return hash.digest('hex').slice(0, 16);
+}
+const PUBLIC_BUILD_VERSION = await getPublicBuildVersion(PUBLIC_DIR);
+app.get('/sw.js', async (_req, res, next) => {
+  try {
+    const source = await fs.readFile(path.join(PUBLIC_DIR, 'sw.js'), 'utf8');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    return res.type('application/javascript').send(source.replaceAll('__CACHE_VERSION__', PUBLIC_BUILD_VERSION));
+  } catch (error) {
+    return next(error);
+  }
+});
+app.use(express.static(PUBLIC_DIR));
 
 async function requireFirebaseUser(req, res, next) {
   if (!firebaseAdminAuth || !firebaseDb) {
