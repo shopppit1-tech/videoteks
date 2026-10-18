@@ -262,8 +262,8 @@ async function initializeSeo() {
       const status = await apiRequest('/api/youtube/seo-status', { method: 'GET' });
       seoAiConfigured = Boolean(status.configured);
       $('#seoHint').textContent = seoAiConfigured
-        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Gunakan subtitle/narasi, topik, atau nama file sebagai konteks.`
-        : 'Isi GEMINI_YOUTUBE_API_KEY di Render untuk mengaktifkan AI judul dan deskripsi.';
+        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Pilih video langsung untuk membuat metadata otomatis dari nama file; subtitle tetap dipakai bila tersedia.`
+        : 'Isi GEMINI_YOUTUBE_API_KEY khusus SEO YouTube di Render; key terjemahan tidak dipakai.';
       updateControls();
       void maybeGenerateSeoMetadata();
       return;
@@ -358,6 +358,7 @@ fileInput.addEventListener('change', () => {
   }
   successLink.hidden = true;
   updateControls();
+  if (!loadingHandoff) void maybeGenerateSeoMetadata();
 });
 
 titleInput.addEventListener('input', () => {
@@ -411,7 +412,7 @@ async function generateSeoMetadata() {
 }
 
 async function maybeGenerateSeoMetadata() {
-  if (seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim())) return;
+  if (seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim() && !selectedFile)) return;
   seoGenerationPromise = generateSeoMetadata();
   try { await seoGenerationPromise; } finally { seoGenerationPromise = null; }
 }

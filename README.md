@@ -45,7 +45,7 @@ Atur `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_TOKEN_ENCRYPTION_KEY
 
 Di halaman **Subtitle Video**, pilih bahasa tujuan dan tekan **Terjemahkan** untuk memakai endpoint penerjemahan yang sudah ada. Setelah ekspor MP4 berhasil, tekan **Lanjutkan video ke YouTube**; MP4 dan teks subtitle disimpan sementara di IndexedDB pada browser yang sama, lalu dimuat otomatis pada halaman upload. Video tetap dapat diunduh seperti biasa.
 
-Metadata SEO YouTube memakai Gemini khusus yang terpisah dari `GEMINI_API_KEY` dan `GEMINI_TTS_API_KEY`. Konfigurasikan `GEMINI_YOUTUBE_API_KEY` dan `GEMINI_YOUTUBE_MODEL` pada Render. API key ini hanya dibaca server. Tombol **Buat judul & deskripsi SEO** meneruskan subtitle/narasi hasil transkripsi atau terjemahan dan topik opsional ke Gemini; hasil tetap dapat diedit sebelum unggah.
+Metadata SEO YouTube hanya memakai Gemini khusus melalui `GEMINI_YOUTUBE_API_KEY` dan `GEMINI_YOUTUBE_MODEL` pada Render; tidak ada fallback ke `GEMINI_API_KEY` transkripsi/terjemahan atau `GEMINI_TTS_API_KEY`. API key hanya dibaca server. Saat video dipilih langsung, Gemini otomatis membuat judul, deskripsi, dan tag menggunakan nama file sebagai konteks; jika video diteruskan dari Subtitle Video, subtitle/terjemahan digunakan sebagai konteks. Nama file, subtitle yang tersedia, dan topik opsional dikirim ke Gemini SEO, tetapi berkas video langsung tidak dikirim ke Gemini oleh fitur metadata ini. Hasil dapat diedit sebelum unggah.
 
 ## Deploy ke Render
 

@@ -83,10 +83,9 @@ function youtubeOAuthConfig() {
 }
 
 function youtubeSeoAIConfig() {
-  // GEMINI_YOUTUBE_API_KEY adalah nama utama; alias ini menjaga deployment
-  // yang sudah terlanjur menyimpan secret dengan nama singkat tetap aktif.
-  const apiKey = String(process.env.GEMINI_YOUTUBE_API_KEY || process.env.GEMINI_YOUTUBE_KEY || process.env.GEMINI_API_KEY || '').trim();
-  const model = String(process.env.GEMINI_YOUTUBE_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash').trim();
+  // SEO YouTube wajib memakai kredensial khusus; jangan fallback ke key transkripsi/terjemahan.
+  const apiKey = String(process.env.GEMINI_YOUTUBE_API_KEY || '').trim();
+  const model = String(process.env.GEMINI_YOUTUBE_MODEL || 'gemini-3.8-flash').trim();
   if (!apiKey || !model) return null;
   return { apiKey, model };
 }
@@ -673,7 +672,7 @@ app.get('/api/youtube/seo-status', requireFirebaseUser, (_req, res) => {
 
 app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
   const config = youtubeSeoAIConfig();
-  if (!config) return res.status(503).json({ error: 'AI SEO Gemini YouTube belum dikonfigurasi. Isi GEMINI_YOUTUBE_API_KEY di server.' });
+  if (!config) return res.status(503).json({ error: 'Gemini SEO YouTube belum dikonfigurasi. Isi GEMINI_YOUTUBE_API_KEY khusus YouTube di server.' });
   const captions = String(req.body?.captions || '').trim().slice(0, 12000);
   const language = String(req.body?.language || '').trim().slice(0, 80);
   const topic = String(req.body?.topic || '').trim().slice(0, 240);
