@@ -33,8 +33,23 @@ body{min-height:100dvh;touch-action:pan-y pinch-zoom;-webkit-overflow-scrolling:
   <header class="hero">
     <p class="eyebrow">FITUR SUARA AI</p>
     <h1>Teks jadi suara</h1>
-    <p>Tulis teks, pilih karakter suara, lalu ubah menjadi audio narasi yang siap diputar atau diunduh.</p>
+    <p>Unggah video untuk membuat narasi hook dan suara otomatis, atau tulis teks sendiri.</p>
   </header>
+  <section class="card" aria-labelledby="videoNarrationTitle">
+    <h2 id="videoNarrationTitle">Video jadi narasi + suara</h2>
+    <p class="hint">AI melihat cuplikan gambar dan mendengar audio video untuk membuat narasi yang sesuai isi serta durasinya.</p>
+    <div class="field">
+      <label for="narrationVideo">Pilih video</label>
+      <input id="narrationVideo" class="select" type="file" accept="video/*">
+      <small id="videoInfo">Belum ada video dipilih.</small>
+    </div>
+    <label class="hint" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px">
+      <input id="videoConsent" type="checkbox">
+      <span>Saya setuju video dikirim untuk analisis AI. Audio dan maksimal 12 cuplikan gambar diproses sementara lalu dihapus.</span>
+    </label>
+    <button id="videoNarrationBtn" class="btn" type="button" disabled>Buat narasi + suara otomatis</button>
+    <div id="videoStatus" class="status" aria-live="polite">Pilih video dan setujui analisis untuk mulai.</div>
+  </section>
   <section class="card">
     <div class="field">
       <label for="textInput">Teks narasi</label>
