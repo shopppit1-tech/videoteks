@@ -62,33 +62,58 @@ function saveVideoForHandoff(blob) {
   });
 }
 
-function loadGeneratedAudio(force = false) {
+function loadGeneratedAudio(force = false, includeVideo = new URLSearchParams(location.search).get('video') === '1') {
   if (!force && new URLSearchParams(location.search).get('generated') !== '1') return;
   const request = indexedDB.open('videoteks-audio', 1);
   request.onupgradeneeded = () => request.result.createObjectStore('generated');
   request.onerror = () => setStatus('Penyimpanan audio AI tidak tersedia di browser.', true);
   request.onsuccess = () => {
     const database = request.result;
-    const getRequest = database.transaction('generated', 'readonly').objectStore('generated').get('latest');
-    getRequest.onsuccess = () => {
-      const record = getRequest.result;
+    const store = database.transaction('generated', 'readonly').objectStore('generated');
+    const audioRequest = store.get('latest');
+    const videoRequest = includeVideo ? store.get('narration-video-latest') : null;
+    let audioRecord = null;
+    let videoRecord = null;
+    let remaining = includeVideo ? 2 : 1;
+    const finish = () => {
+      remaining -= 1;
+      if (remaining > 0) return;
       database.close();
-      if (!record?.blob) {
-        setStatus('Audio AI tidak ditemukan. Buat audio terlebih dahulu.', true);
-        return;
-      }
-      const file = new File([record.blob], record.name || 'suara-ai.wav', { type: record.blob.type || 'audio/wav' });
       try {
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        audioInput.files = transfer.files;
-        audioInput.dispatchEvent(new Event('change'));
-        setStatus('Audio AI sudah dimasukkan. Pilih video untuk melanjutkan.');
+        if (audioRecord?.blob) {
+          const file = new File([audioRecord.blob], audioRecord.name || 'suara-ai.wav', { type: audioRecord.blob.type || 'audio/wav' });
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          audioInput.files = transfer.files;
+          audioInput.dispatchEvent(new Event('change'));
+        }
+        if (videoRecord?.blob) {
+          const file = new File([videoRecord.blob], videoRecord.name || 'video-narasi.mp4', { type: videoRecord.blob.type || 'video/mp4' });
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          videoInput.files = transfer.files;
+          videoInput.dispatchEvent(new Event('change'));
+        }
+        const messages = [];
+        if (audioRecord?.blob) messages.push('Audio AI sudah dimasukkan.');
+        else messages.push('Audio AI tidak ditemukan. Buat audio terlebih dahulu.');
+        if (includeVideo) {
+          if (videoRecord?.blob) messages.push('Video sumber juga sudah dimasukkan.');
+          else messages.push('Video sumber tidak ditemukan; pilih video kembali.');
+        } else {
+          messages.push('Pilih video untuk melanjutkan.');
+        }
+        setStatus(messages.join(' '), !audioRecord?.blob || (includeVideo && !videoRecord?.blob));
       } catch {
-        setStatus('Audio AI tersimpan, tetapi browser tidak dapat memasukkannya otomatis.', true);
+        setStatus('File tersimpan, tetapi browser tidak dapat memasukkan audio atau video secara otomatis.', true);
       }
     };
-    getRequest.onerror = () => { database.close(); setStatus('Audio AI tidak dapat dibaca.', true); };
+    audioRequest.onsuccess = () => { audioRecord = audioRequest.result; finish(); };
+    audioRequest.onerror = () => { database.close(); setStatus('Audio AI tidak dapat dibaca.', true); };
+    if (videoRequest) {
+      videoRequest.onsuccess = () => { videoRecord = videoRequest.result; finish(); };
+      videoRequest.onerror = () => { database.close(); setStatus('Video sumber tidak dapat dibaca.', true); };
+    }
   };
 }
 
@@ -252,7 +277,7 @@ replaceBtn.onclick = async () => {
 
 window.addEventListener('message', (event) => {
   if (event.origin === location.origin && event.source === window.parent && event.data?.source === 'videoteks-shell' && event.data.type === 'load-generated-audio') {
-    loadGeneratedAudio(true);
+    loadGeneratedAudio(true, event.data.includeVideo);
   }
 });
 loadGeneratedAudio();

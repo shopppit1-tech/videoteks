@@ -47,6 +47,7 @@ let metadataUrl = null;
 let selectedVideoDuration = null;
 let busy = false;
 let videoBusy = false;
+let audioHandoffSaved = false;
 
 function setStatus(message, error = false) {
   status.textContent = message;
@@ -99,10 +100,26 @@ function saveAudioForHandoff(blob) {
   });
 }
 
+function saveVideoForHandoff(file) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('videoteks-audio', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('generated');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction('generated', 'readwrite');
+      transaction.objectStore('generated').put({ blob: file, name: file.name || 'video-narasi.mp4', createdAt: Date.now() }, 'narration-video-latest');
+      transaction.oncomplete = () => { database.close(); resolve(); };
+      transaction.onerror = () => { database.close(); reject(transaction.error); };
+    };
+  });
+}
+
 async function createVoice(textValue) {
   const text = String(textValue || '').trim();
   if (!text || busy) return false;
   busy = true;
+  audioHandoffSaved = false;
   updateVideoControls();
   result.hidden = true;
   generateBtn.textContent = 'Membuat suara...';
@@ -123,7 +140,10 @@ async function createVoice(textValue) {
     audioResult.src = audioUrl;
     downloadLink.href = audioUrl;
     audioHandoff.href = 'audio.html?generated=1&standalone=1';
-    try { await saveAudioForHandoff(blob); } catch { /* unduhan tetap tersedia jika penyimpanan browser tidak tersedia */ }
+    try {
+      await saveAudioForHandoff(blob);
+      audioHandoffSaved = true;
+    } catch { /* audio tetap dapat diputar atau diunduh jika penyimpanan browser tidak tersedia */ }
     result.hidden = false;
     const historyStatus = response.headers.get('X-History-Saved') === 'true' ? 'Riwayat tersimpan.' : 'Riwayat belum tersimpan.';
     setStatus(`Selesai. Audio siap diputar atau diunduh. ${historyStatus}`);
@@ -204,9 +224,16 @@ videoNarrationBtn.addEventListener('click', async () => {
     const duration = Number.isFinite(Number(data.durationSeconds)) ? Number(data.durationSeconds) : selectedVideoDuration;
     setVideoStatus(`Narasi untuk video ${formatDuration(duration)} selesai. Membuat suara otomatis…`);
     const voiceCreated = await createVoice(narration);
-    setVideoStatus(voiceCreated
-      ? 'Selesai. Naskah ada di kolom Teks narasi dan suara siap diputar atau diunduh.'
-      : 'Naskah sudah dibuat. Pembuatan suara gagal; lihat pesan pada bagian Teks narasi.', !voiceCreated);
+    if (!voiceCreated) {
+      setVideoStatus('Naskah sudah dibuat. Pembuatan suara gagal; lihat pesan pada bagian Teks narasi.', true);
+    } else if (!audioHandoffSaved) {
+      setVideoStatus('Suara berhasil dibuat, tetapi audio tidak dapat disiapkan untuk dipindahkan. Silakan unduh audio dan lanjutkan secara manual.', true);
+    } else {
+      await saveVideoForHandoff(file);
+      audioHandoff.href = 'audio.html?generated=1&video=1&standalone=1';
+      setVideoStatus('Narasi, audio, dan video siap. Membuka menu Ganti Audio…');
+      audioHandoff.click();
+    }
   } catch (error) {
     setVideoStatus(error.message, true);
   } finally {
