@@ -25,6 +25,7 @@ const SHELL_FILES = [
   'voice.js',
   'youtube.html',
   'youtube.js',
+  'youtube.js?v=seo-activate-1',
   'youtube-handoff.js',
   'history.html',
   'history.js',
