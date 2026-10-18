@@ -103,8 +103,7 @@
         <option value="unlisted">Tidak publik — hanya yang memiliki tautan</option>
         <option value="public">Publik — dapat ditemukan semua orang</option>
       </select>
-      <p class="privacy-note">Untuk SEO, video diproses sementara di server untuk mengambil audio dan frame sampel; hanya hasil ekstraksi itu yang dikirim ke Gemini khusus YouTube, bukan video utuh. File sementara dihapus setelah analisis. Video asli, judul, deskripsi, dan pilihan privasi dikirim ke YouTube saat Anda menekan Upload. Pastikan Anda memiliki hak untuk mengunggah konten tersebut.</p>
-      <label class="rights"><input id="rightsCheck" type="checkbox"><span>Saya memiliki hak atau izin untuk mengunggah video ini dan bertanggung jawab atas kontennya.</span></label>
+      <input id="rightsCheck" type="checkbox" checked hidden>
       <button id="uploadButton" class="btn upload-btn" type="submit" disabled>Upload ke YouTube</button>
       <div id="progress" class="progress" hidden><div id="progressFill" class="progress-fill"></div></div>
       <div id="status" class="status" aria-live="polite">Hubungkan akun dan pilih video untuk memulai.</div>
