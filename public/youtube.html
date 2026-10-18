@@ -75,7 +75,7 @@
     </section>
     <form id="uploadForm" class="card">
       <h2 class="card-title">Detail video</h2>
-      <p class="muted">Isi sendiri atau buat judul dan deskripsi SEO dengan AI khusus yang Anda konfigurasi.</p>
+      <p class="muted">Subtitle/terjemahan dari VideoTeks akan dipakai untuk mengisi metadata SEO secara otomatis.</p>
       <label class="file-pick" for="videoFile">
         <span class="file-icon" aria-hidden="true">＋</span>
         <span class="file-copy"><strong>Pilih video dari perangkat</strong><small>File akan dikirim langsung ke akun video yang Anda hubungkan.</small><span id="fileName" class="file-name">Belum ada video dipilih</span></span>
@@ -96,7 +96,8 @@
         <label for="seoTopic">Topik atau kata kunci SEO (opsional)</label>
         <input id="seoTopic" class="text single" type="text" maxlength="240" placeholder="Contoh: tips belajar bahasa Inggris">
         <small id="seoHint">AI untuk metadata diatur terpisah dari AI subtitle dan Suara AI.</small>
-        <button id="seoButton" class="btn secondary seo-button" type="button" disabled>Buat judul &amp; deskripsi SEO</button>
+        <button id="seoButton" class="btn secondary seo-button" type="button" disabled>Buat ulang metadata AI</button>
+        <small id="seoTagsHint">Tag SEO akan dibuat otomatis dari subtitle/terjemahan.</small>
       </div>
       <div class="field">
         <label for="privacyStatus">Siapa yang dapat menonton?</label>

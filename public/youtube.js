@@ -25,6 +25,8 @@ let selectedFile = null;
 let uploading = false;
 let seoBusy = false;
 let seoAiConfigured = false;
+let seoTags = [];
+let seoGenerationPromise = null;
 let sourceCaptions = '';
 let sourceLanguage = '';
 let loadingHandoff = false;
@@ -38,7 +40,7 @@ function setStatus(message, isError = false) {
 function updateControls() {
   connectButton.disabled = !codeClient || uploading;
   disconnectButton.hidden = !accessToken;
-  uploadButton.disabled = uploading || !accessToken || !selectedFile || !titleInput.value.trim() || !rightsCheck.checked;
+  uploadButton.disabled = uploading || seoBusy || !accessToken || !selectedFile || !titleInput.value.trim() || !rightsCheck.checked;
   fileInput.disabled = uploading;
   titleInput.disabled = uploading;
   descriptionInput.disabled = uploading;
@@ -239,6 +241,7 @@ async function initializeSeo() {
         ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Subtitle/narasi diteruskan sebagai konteks.`
         : 'Isi GEMINI_YOUTUBE_API_KEY di Render untuk mengaktifkan AI judul dan deskripsi.';
       updateControls();
+      void maybeGenerateSeoMetadata();
       return;
     } catch (error) {
       lastError = error;
@@ -268,6 +271,7 @@ async function loadHandoffVideo() {
       ? `Video hasil subtitle/terjemahan (${sourceLanguage}) dimasukkan otomatis.`
       : 'Video hasil subtitle dimasukkan otomatis.';
     $('#handoffHint').hidden = false;
+    void maybeGenerateSeoMetadata();
   } catch (error) {
     loadingHandoff = false;
     $('#handoffHint').textContent = error.message || 'Hasil video tidak dapat dimuat.';
@@ -341,11 +345,11 @@ descriptionInput.addEventListener('input', () => {
   $('#descriptionCount').textContent = String(descriptionInput.value.length);
 });
 
-seoButton.addEventListener('click', async () => {
+async function generateSeoMetadata() {
   if (!seoAiConfigured || seoBusy || uploading) return;
   seoBusy = true;
   seoButton.textContent = 'Membuat metadata…';
-  setStatus('AI SEO sedang menyiapkan judul dan deskripsi…');
+  setStatus('AI SEO sedang menyiapkan judul, deskripsi, dan tag…');
   updateControls();
   try {
     const data = await apiRequest('/api/youtube/seo-metadata', {
@@ -359,23 +363,35 @@ seoButton.addEventListener('click', async () => {
     });
     titleInput.value = String(data.title || '').slice(0, 100);
     descriptionInput.value = String(data.description || '').slice(0, 5000);
+    seoTags = Array.isArray(data.tags) ? data.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
+    $('#seoTagsHint').textContent = seoTags.length
+      ? `Tag otomatis: ${seoTags.join(', ')}`
+      : 'Tidak ada tag yang dikembalikan AI.';
     titleInput.dispatchEvent(new Event('input'));
     descriptionInput.dispatchEvent(new Event('input'));
-    setStatus('Judul dan deskripsi SEO dibuat. Periksa dan edit sebelum mengunggah.');
+    setStatus('Judul, deskripsi, dan tag SEO sudah dibuat otomatis. Anda tinggal menekan Upload ke YouTube.');
   } catch (error) {
     setStatus(error.message || 'AI SEO gagal membuat metadata.', true);
   } finally {
     seoBusy = false;
-    seoButton.textContent = 'Buat judul & deskripsi SEO';
+    seoButton.textContent = 'Buat ulang metadata AI';
     updateControls();
   }
-});
+}
+
+async function maybeGenerateSeoMetadata() {
+  if (seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim())) return;
+  seoGenerationPromise = generateSeoMetadata();
+  try { await seoGenerationPromise; } finally { seoGenerationPromise = null; }
+}
+
+seoButton.addEventListener('click', () => { void generateSeoMetadata(); });
 
 rightsCheck.addEventListener('change', updateControls);
 
 $('#uploadForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!accessToken || !selectedFile || !titleInput.value.trim() || !rightsCheck.checked || uploading) return;
+  if (!accessToken || !selectedFile || !titleInput.value.trim() || !rightsCheck.checked || uploading || seoBusy) return;
   uploading = true;
   progress.hidden = false;
   progressFill.style.width = '0%';
@@ -385,7 +401,8 @@ $('#uploadForm').addEventListener('submit', async (event) => {
   const metadata = {
     snippet: {
       title: titleInput.value.trim(),
-      description: descriptionInput.value.trim()
+      description: descriptionInput.value.trim(),
+      ...(seoTags.length ? { tags: seoTags } : {})
     },
     status: { privacyStatus: $('#privacyStatus').value }
   };

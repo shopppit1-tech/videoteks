@@ -681,8 +681,9 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
   const prompt = [
     'Buat metadata YouTube yang menarik dan ramah pencarian berdasarkan konteks yang diberikan.',
     'Jangan mengarang fakta yang tidak ada dalam konteks. Hindari clickbait menyesatkan.',
-    'Kembalikan hanya JSON valid dengan tepat dua string: {"title":"...","description":"..."}.',
+    'Kembalikan hanya JSON valid dengan tiga properti: {"title":"...","description":"...","tags":["..."]}.',
     'Judul maksimal 100 karakter. Deskripsi maksimal 5000 karakter, tulis ringkas, relevan, natural, dan boleh menyertakan tagar seperlunya.',
+    'Buat 3 sampai 15 tag YouTube yang relevan, singkat, tanpa tanda #, dan jangan mengulang tag yang sama.',
     language ? `Bahasa target subtitle/video: ${language}. Tulis metadata dalam bahasa tersebut.` : 'Gunakan bahasa yang paling sesuai dengan konteks.',
     topic ? `Topik/kata kunci tambahan dari pengguna: ${topic}` : '',
     captions ? `Subtitle/konteks video:\n${captions}` : ''
@@ -696,9 +697,20 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
     const metadata = parseSeoMetadata(text);
     const title = String(metadata?.title || '').trim().slice(0, 100);
     const description = String(metadata?.description || '').trim().slice(0, 5000);
+    const tags = Array.isArray(metadata?.tags)
+      ? [...new Set(metadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean))].slice(0, 30)
+      : [];
+    const tagsWithinLimit = [];
+    let tagsLength = 0;
+    for (const tag of tags) {
+      const nextLength = tagsLength + tag.length + (tagsWithinLimit.length ? 1 : 0);
+      if (nextLength > 500) break;
+      tagsWithinLimit.push(tag);
+      tagsLength = nextLength;
+    }
     if (!title || !description) return res.status(502).json({ error: 'Gemini tidak mengembalikan judul dan deskripsi. Coba lagi.' });
     res.set('Cache-Control', 'no-store');
-    res.json({ title, description });
+    res.json({ title, description, tags: tagsWithinLimit });
   } catch (error) {
     console.warn('[youtube-seo] Gemini request failed:', error.message || error.name || 'Error');
     res.status(502).json({ error: 'Gemini tidak dapat membuat judul dan deskripsi. Periksa API key, model, kuota, lalu coba lagi.' });
