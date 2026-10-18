@@ -56,6 +56,16 @@ window.addEventListener('pageshow', () => {
   document.body.classList.remove('page-loading');
 });
 
+function reportFrameSize() {
+  if (window.parent === window) return;
+  const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0, window.innerHeight);
+  window.parent.postMessage({ source: 'videoteks-feature', type: 'frame-size', height }, location.origin);
+}
+
+window.addEventListener('load', reportFrameSize);
+window.addEventListener('resize', reportFrameSize);
+if (window.ResizeObserver) new ResizeObserver(reportFrameSize).observe(document.documentElement);
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => {});

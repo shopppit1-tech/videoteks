@@ -139,6 +139,11 @@ window.addEventListener('message', (event) => {
     location.replace(new URL('index.html', APP_BASE).href);
     return;
   }
+  if (event.data.type === 'frame-size') {
+    const height = Number(event.data.height);
+    if (Number.isFinite(height) && height > 0) sourceFrame.style.height = `${Math.max(window.innerHeight, Math.ceil(height))}px`;
+    return;
+  }
   if (event.data.type === 'auth-required') {
     redirectToLogin();
     return;
