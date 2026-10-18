@@ -150,10 +150,8 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (event.data.type === 'frame-size') {
-    // Keep YouTube inside its own viewport so scrolling stays in the iframe.
-    if (sourceFrame === frames.get('youtube')) return;
-    const height = Number(event.data.height);
-    if (Number.isFinite(height) && height > 0) sourceFrame.style.height = `${Math.max(window.innerHeight, Math.ceil(height))}px`;
+    // Keep every feature iframe at the viewport height so its document can scroll internally.
+    sourceFrame.style.height = '100%';
     return;
   }
   if (event.data.type === 'auth-required') {
