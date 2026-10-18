@@ -86,6 +86,23 @@ function parseResponse(text) {
   try { return text ? JSON.parse(text) : null; } catch { return null; }
 }
 
+function parseSeoTags(value) {
+  const tags = [];
+  const seen = new Set();
+  let totalLength = 0;
+  for (const raw of String(value || '').split(/[\n,;]/)) {
+    const tag = raw.trim().replace(/^#+\s*/, '');
+    const key = tag.toLowerCase();
+    const nextLength = totalLength + tag.length + (tags.length ? 1 : 0);
+    if (!tag || tag.length > 80 || seen.has(key) || nextLength > 500) continue;
+    tags.push(tag);
+    seen.add(key);
+    totalLength = nextLength;
+    if (tags.length === 30) break;
+  }
+  return tags;
+}
+
 function apiErrorMessage(text, statusCode) {
   const response = parseResponse(text);
   const message = response?.error || response?.error_description;
@@ -414,6 +431,7 @@ async function generateSeoMetadata() {
     titleInput.value = String(data.title || '').slice(0, 100);
     descriptionInput.value = String(data.description || '').slice(0, 5000);
     seoTags = Array.isArray(data.tags) ? data.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
+    if (seoTags.length) seoTopic.value = seoTags.join(', ');
     $('#seoTagsHint').textContent = seoTags.length
       ? `Tag SEO siap (${seoTags.length})`
       : 'Tidak ada tag yang dikembalikan AI.';
@@ -440,6 +458,10 @@ async function maybeGenerateSeoMetadata() {
 }
 
 seoButton.addEventListener('click', () => { void generateSeoMetadata(); });
+seoTopic.addEventListener('input', () => {
+  seoTags = parseSeoTags(seoTopic.value);
+  $('#seoTagsHint').textContent = seoTags.length ? `Tag SEO siap (${seoTags.length})` : '';
+});
 seoContentConsent.addEventListener('change', () => { if (seoContentConsent.checked) void maybeGenerateSeoMetadata(); });
 
 rightsCheck.addEventListener('change', updateControls);
