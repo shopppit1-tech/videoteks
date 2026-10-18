@@ -83,7 +83,9 @@ function youtubeOAuthConfig() {
 }
 
 function youtubeSeoAIConfig() {
-  const apiKey = String(process.env.GEMINI_YOUTUBE_API_KEY || '').trim();
+  // GEMINI_YOUTUBE_API_KEY adalah nama utama; alias ini menjaga deployment
+  // yang sudah terlanjur menyimpan secret dengan nama singkat tetap aktif.
+  const apiKey = String(process.env.GEMINI_YOUTUBE_API_KEY || process.env.GEMINI_YOUTUBE_KEY || '').trim();
   const model = String(process.env.GEMINI_YOUTUBE_MODEL || 'gemini-3.8-flash').trim();
   if (!apiKey || !model) return null;
   return { apiKey, model };
@@ -665,7 +667,8 @@ app.get('/api/youtube/status', requireFirebaseUser, async (req, res) => {
 
 app.get('/api/youtube/seo-status', requireFirebaseUser, (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ configured: Boolean(youtubeSeoAIConfig()) });
+  const config = youtubeSeoAIConfig();
+  res.json({ configured: Boolean(config), model: config?.model || null });
 });
 
 app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {

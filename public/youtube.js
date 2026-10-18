@@ -230,16 +230,23 @@ async function initializeOAuth() {
 }
 
 async function initializeSeo() {
-  try {
-    const status = await apiRequest('/api/youtube/seo-status', { method: 'GET' });
-    seoAiConfigured = Boolean(status.configured);
-    $('#seoHint').textContent = seoAiConfigured
-      ? 'Gemini YouTube siap. Subtitle/narasi diteruskan sebagai konteks.'
-      : 'Isi GEMINI_YOUTUBE_API_KEY di Render untuk mengaktifkan AI judul dan deskripsi.';
-  } catch (error) {
-    seoAiConfigured = false;
-    $('#seoHint').textContent = error.message || 'Status AI SEO belum dapat diperiksa.';
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const status = await apiRequest('/api/youtube/seo-status', { method: 'GET' });
+      seoAiConfigured = Boolean(status.configured);
+      $('#seoHint').textContent = seoAiConfigured
+        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Subtitle/narasi diteruskan sebagai konteks.`
+        : 'Isi GEMINI_YOUTUBE_API_KEY di Render untuk mengaktifkan AI judul dan deskripsi.';
+      updateControls();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
   }
+  seoAiConfigured = false;
+  $('#seoHint').textContent = lastError?.message || 'Status AI SEO belum dapat diperiksa.';
   updateControls();
 }
 
