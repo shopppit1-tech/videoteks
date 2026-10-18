@@ -67,6 +67,15 @@ function navigate(route, params = new URLSearchParams(), { writeHistory = false,
   const cleanParams = new URLSearchParams(params);
   cleanParams.delete('view');
 
+  if (route === 'app') {
+    const standaloneUrl = new URL(ROUTES.app.file, APP_BASE);
+    for (const [key, value] of cleanParams.entries()) standaloneUrl.searchParams.append(key, value);
+    standaloneUrl.searchParams.set('standalone', '1');
+    standaloneUrl.hash = hash;
+    location.replace(standaloneUrl.href);
+    return;
+  }
+
   if (writeHistory) {
     const url = shellUrl(route, cleanParams, hash);
     const method = replaceHistory ? 'replaceState' : 'pushState';

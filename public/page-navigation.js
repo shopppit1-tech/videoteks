@@ -23,7 +23,7 @@ function routeFromUrl(url) {
 if (window.parent === window) {
   const current = new URL(location.href);
   const route = current.pathname.startsWith(APP_BASE.pathname) ? FEATURE_ROUTES[current.pathname.split('/').pop()] : null;
-  if (route) {
+  if (route && current.searchParams.get('standalone') !== '1') {
     const shell = new URL('studio.html', current);
     shell.search = '';
     shell.searchParams.set('view', route);
