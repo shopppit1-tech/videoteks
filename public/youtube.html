@@ -109,7 +109,34 @@
       <div id="status" class="status" aria-live="polite">Pilih video untuk membuat metadata otomatis.</div>
       <a id="successLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat video yang diunggah</a>
     </form>
+    <section class="card" aria-labelledby="autoUploadTitle">
+      <h2 id="autoUploadTitle" class="card-title">Otomatis dari Google Drive</h2>
+      <p class="muted">Taruh video dalam satu folder Drive. Video yang paling lama dan belum pernah diunggah akan diproses satu per hari.</p>
+      <div class="account-row">
+        <div class="account-mark" aria-hidden="true">▶</div>
+        <div class="account-copy">
+          <strong id="driveAccountLabel">Google Drive belum terhubung</strong>
+          <small id="driveAccountHint"></small>
+        </div>
+        <div class="account-actions">
+          <button id="driveConnectButton" class="btn secondary" type="button" disabled>Hubungkan Drive</button>
+          <button id="driveDisconnectButton" class="btn secondary" type="button" hidden>Lepas Drive</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="driveFolderId">Folder antrean Google Drive</label>
+        <input id="driveFolderId" class="text single" type="url" inputmode="url" placeholder="Tempel tautan folder Drive">
+        <small>Salin tautan folder Drive. Video harus berada langsung di folder ini (bukan di subfolder); file sumber tidak dipindah atau dihapus. Batas 500 MB per video.</small>
+      </div>
+      <div class="field">
+        <label><input id="autoUploadEnabled" type="checkbox"> Aktifkan unggah otomatis satu video per hari sebagai Publik</label>
+        <small>Jadwal sekitar pukul 10.05 WIB. Judul, deskripsi, dan tag dibuat Gemini dari audio serta cuplikan gambar video.</small>
+      </div>
+      <button id="saveAutoUploadButton" class="btn secondary" type="button">Simpan pengaturan otomatis</button>
+      <div id="autoUploadStatus" class="status" aria-live="polite">Belum diaktifkan.</div>
+      <a id="autoUploadSuccessLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat unggahan otomatis terakhir</a>
+    </section>
   </main>
-  <script type="module" src="youtube.js?v=seo-keywords-5"></script>
+  <script type="module" src="youtube.js?v=drive-auto-1"></script>
 </body>
 </html>

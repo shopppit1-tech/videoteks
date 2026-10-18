@@ -43,7 +43,15 @@ const successLink = $('#successLink');
 const seoButton = $('#seoButton');
 const seoTopic = $('#seoTopic');
 const seoContentConsent = $('#seoContentConsent');
+const driveConnectButton = $('#driveConnectButton');
+const driveDisconnectButton = $('#driveDisconnectButton');
+const driveFolderIdInput = $('#driveFolderId');
+const autoUploadEnabledInput = $('#autoUploadEnabled');
+const saveAutoUploadButton = $('#saveAutoUploadButton');
+const autoUploadStatus = $('#autoUploadStatus');
+const autoUploadSuccessLink = $('#autoUploadSuccessLink');
 let codeClient = null;
+let driveCodeClient = null;
 let accessToken = null;
 let selectedFile = null;
 let uploading = false;
@@ -55,6 +63,10 @@ let sourceCaptions = '';
 let sourceLanguage = '';
 let loadingHandoff = false;
 let authorizationTimer = null;
+let driveAuthorizationTimer = null;
+let driveConnected = false;
+let autoUploadSaving = false;
+let autoUploadSavedEnabled = false;
 
 function setStatus(message, isError = false) {
   statusNode.textContent = message;
@@ -139,6 +151,158 @@ async function apiRequest(url, options = {}) {
     throw error;
   }
   return data;
+}
+
+function updateDriveConnectionUI() {
+  $('#driveAccountLabel').textContent = driveConnected ? 'Google Drive terhubung' : 'Google Drive belum terhubung';
+  $('#driveAccountHint').textContent = driveConnected ? 'Izin Google bersifat baca-saja; aplikasi hanya mengambil video dari folder yang Anda pilih.' : '';
+  driveConnectButton.hidden = driveConnected;
+  driveDisconnectButton.hidden = !driveConnected;
+  driveConnectButton.disabled = !driveCodeClient || autoUploadSaving;
+  driveDisconnectButton.disabled = autoUploadSaving;
+}
+
+function formatAutoUploadStatus(data) {
+  if (!data.enabled) return 'Otomatis nonaktif. Hubungkan Drive, pilih folder, lalu aktifkan jika siap.';
+  if (!data.connectedDrive) return 'Upload otomatis aktif, tetapi Google Drive terputus. Hubungkan Drive kembali sebelum jadwal berikutnya.';
+  if (!data.connectedYoutube) return 'Upload otomatis aktif, tetapi akun YouTube terputus. Hubungkan YouTube kembali sebelum jadwal berikutnya.';
+  if (data.status === 'error') return `Unggahan otomatis gagal: ${data.lastError || 'terjadi kesalahan.'} Video tetap di Drive dan akan dicoba pada jadwal berikutnya.`;
+  if (data.status === 'uploaded' && data.lastVideoId) {
+    const time = data.lastUploadedAt ? new Date(data.lastUploadedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' }) : '';
+    return `Terakhir berhasil: ${data.lastFileName || 'video'}${time ? ` · ${time} WIB` : ''}. Berikutnya satu video per hari sekitar 10.05 WIB.`;
+  }
+  if (data.status === 'empty') return 'Folder belum memiliki video baru. Pemeriksaan berikutnya besok sekitar 10.05 WIB.';
+  if (data.status === 'processing') return 'Video sedang dianalisis dan diunggah.';
+  return `Aktif. Antrean: ${data.folderName || 'folder Drive terpilih'}. Satu video per hari sekitar 10.05 WIB, visibilitas Publik.`;
+}
+
+async function loadAutoUploadSettings() {
+  try {
+    const data = await apiRequest('/api/youtube/auto-upload', { method: 'GET' });
+    driveConnected = Boolean(data.connectedDrive);
+    driveFolderIdInput.value = data.folderId || '';
+    autoUploadEnabledInput.checked = Boolean(data.enabled);
+    autoUploadSavedEnabled = Boolean(data.enabled);
+    autoUploadStatus.textContent = formatAutoUploadStatus(data);
+    autoUploadStatus.className = `status${data.status === 'error' || (data.enabled && (!data.connectedDrive || !data.connectedYoutube)) ? ' error' : ''}`;
+    if (data.lastVideoId) {
+      autoUploadSuccessLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(data.lastVideoId)}`;
+      autoUploadSuccessLink.hidden = false;
+    } else {
+      autoUploadSuccessLink.hidden = true;
+    }
+    updateDriveConnectionUI();
+  } catch (error) {
+    autoUploadStatus.textContent = error.message || 'Pengaturan upload otomatis gagal dimuat.';
+    autoUploadStatus.className = 'status error';
+  }
+}
+
+function clearDriveAuthorizationTimer() {
+  if (driveAuthorizationTimer) clearTimeout(driveAuthorizationTimer);
+  driveAuthorizationTimer = null;
+}
+
+async function handleDriveAuthorizationCode(response) {
+  clearDriveAuthorizationTimer();
+  if (response?.error || !response?.code) {
+    driveConnectButton.textContent = 'Hubungkan Drive';
+    autoUploadStatus.textContent = response?.error_description || response?.error || 'Persetujuan Google Drive tidak berhasil.';
+    autoUploadStatus.className = 'status error';
+    updateDriveConnectionUI();
+    return;
+  }
+  autoUploadSaving = true;
+  driveConnectButton.textContent = 'Menghubungkan…';
+  autoUploadStatus.textContent = 'Menyimpan izin Google Drive dengan aman…';
+  updateDriveConnectionUI();
+  try {
+    await apiRequest('/api/youtube/drive/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XmlHttpRequest' },
+      body: JSON.stringify({ code: response.code })
+    });
+    driveConnected = true;
+    autoUploadStatus.textContent = 'Google Drive terhubung. Tempel tautan folder Drive untuk memilih antrean.';
+    autoUploadStatus.className = 'status';
+    await loadAutoUploadSettings();
+  } catch (error) {
+    autoUploadStatus.textContent = error.message || 'Google Drive gagal disambungkan.';
+    autoUploadStatus.className = 'status error';
+  } finally {
+    autoUploadSaving = false;
+    driveConnectButton.textContent = 'Hubungkan Drive';
+    updateDriveConnectionUI();
+  }
+}
+
+async function initializeDriveAutoUpload() {
+  try {
+    const status = await apiRequest('/api/youtube/drive/status', { method: 'GET' });
+    driveConnected = Boolean(status.connected);
+    if (status.configured && status.clientId) {
+      const oauth = await waitForIdentityLibrary();
+      driveCodeClient = oauth.initCodeClient({
+        client_id: status.clientId,
+        scope: 'https://www.googleapis.com/auth/drive.readonly',
+        include_granted_scopes: true,
+        ux_mode: 'popup',
+        callback: handleDriveAuthorizationCode,
+        error_callback: (error) => {
+          clearDriveAuthorizationTimer();
+          driveConnectButton.textContent = 'Hubungkan Drive';
+          autoUploadStatus.textContent = error?.message || 'Jendela izin Drive tidak dapat dibuka. Coba lagi.';
+          autoUploadStatus.className = 'status error';
+          updateDriveConnectionUI();
+        }
+      });
+    } else {
+      $('#driveAccountHint').textContent = 'Integrasi Google belum dikonfigurasi di server.';
+    }
+    updateDriveConnectionUI();
+    await loadAutoUploadSettings();
+  } catch (error) {
+    $('#driveAccountHint').textContent = error.message || 'Status Google Drive belum tersedia.';
+    autoUploadStatus.textContent = error.message || 'Pengaturan upload otomatis belum tersedia.';
+    autoUploadStatus.className = 'status error';
+    updateDriveConnectionUI();
+  }
+}
+
+async function saveAutoUploadSettings() {
+  if (autoUploadSaving) return;
+  const enabled = autoUploadEnabledInput.checked;
+  if (enabled && !autoUploadSavedEnabled && !window.confirm('Aktifkan unggah otomatis? Setiap hari sekitar pukul 10.05 WIB, satu video tertua yang belum diunggah dari folder ini akan dianalisis Gemini dan diunggah ke YouTube dengan visibilitas PUBLIK. Video sumber tidak dipindah atau dihapus.')) {
+    autoUploadEnabledInput.checked = autoUploadSavedEnabled;
+    return;
+  }
+  autoUploadSaving = true;
+  saveAutoUploadButton.disabled = true;
+  saveAutoUploadButton.textContent = 'Menyimpan…';
+  autoUploadStatus.textContent = 'Memeriksa izin akun dan folder Drive…';
+  autoUploadStatus.className = 'status';
+  updateDriveConnectionUI();
+  try {
+    const data = await apiRequest('/api/youtube/auto-upload', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, folderId: driveFolderIdInput.value.trim() })
+    });
+    autoUploadEnabledInput.checked = Boolean(data.enabled);
+    autoUploadStatus.textContent = data.enabled
+      ? `Aktif untuk folder “${data.folderName || 'Drive'}”. Satu video per hari sekitar 10.05 WIB akan diunggah Publik.`
+      : 'Pengaturan disimpan. Upload otomatis nonaktif.';
+    autoUploadStatus.className = 'status';
+    await loadAutoUploadSettings();
+  } catch (error) {
+    autoUploadStatus.textContent = error.message || 'Pengaturan upload otomatis gagal disimpan.';
+    autoUploadStatus.className = 'status error';
+  } finally {
+    autoUploadSaving = false;
+    saveAutoUploadButton.disabled = false;
+    saveAutoUploadButton.textContent = 'Simpan pengaturan otomatis';
+    updateDriveConnectionUI();
+  }
 }
 
 function setConnected(token) {
@@ -346,6 +510,7 @@ disconnectButton.addEventListener('click', async () => {
   try {
     await apiRequest('/api/youtube/connection', { method: 'DELETE' });
     setDisconnected('Koneksi YouTube telah dilepas.');
+    await loadAutoUploadSettings();
   } catch (error) {
     setStatus(error.message || 'Koneksi YouTube gagal dilepas.', true);
   } finally {
@@ -463,9 +628,41 @@ seoTopic.addEventListener('input', () => {
   $('#seoTagsHint').textContent = seoTags.length ? `Tag SEO siap (${seoTags.length})` : '';
 });
 seoContentConsent.addEventListener('change', () => { if (seoContentConsent.checked) void maybeGenerateSeoMetadata(); });
-
 rightsCheck.addEventListener('change', updateControls);
-
+driveConnectButton.addEventListener('click', () => {
+  if (!driveCodeClient || autoUploadSaving) return;
+  driveConnectButton.disabled = true;
+  driveConnectButton.textContent = 'Menunggu…';
+  autoUploadStatus.textContent = 'Menunggu persetujuan baca folder Google Drive…';
+  autoUploadStatus.className = 'status';
+  driveCodeClient.requestCode({ prompt: 'consent select_account' });
+  clearDriveAuthorizationTimer();
+  driveAuthorizationTimer = setTimeout(() => {
+    driveConnectButton.textContent = 'Hubungkan Drive';
+    updateDriveConnectionUI();
+    if (!driveConnected) autoUploadStatus.textContent = 'Jika jendela persetujuan ditutup, tekan Hubungkan Drive untuk mencoba lagi.';
+  }, 30000);
+});
+driveDisconnectButton.addEventListener('click', async () => {
+  if (autoUploadSaving || !window.confirm('Lepas akses Google Drive? Upload otomatis akan dimatikan, tetapi akun YouTube tetap terhubung.')) return;
+  autoUploadSaving = true;
+  updateDriveConnectionUI();
+  try {
+    await apiRequest('/api/youtube/drive/connection', { method: 'DELETE' });
+    driveConnected = false;
+    autoUploadEnabledInput.checked = false;
+    autoUploadStatus.textContent = 'Akses Drive dilepas dan upload otomatis dimatikan.';
+    autoUploadStatus.className = 'status';
+  } catch (error) {
+    autoUploadStatus.textContent = error.message || 'Akses Google Drive gagal dilepas.';
+    autoUploadStatus.className = 'status error';
+  } finally {
+    autoUploadSaving = false;
+    updateDriveConnectionUI();
+    await loadAutoUploadSettings();
+  }
+});
+saveAutoUploadButton.addEventListener('click', () => { void saveAutoUploadSettings(); });
 $('#uploadForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!accessToken || !selectedFile || !titleInput.value.trim() || !rightsCheck.checked || uploading || seoBusy) return;
@@ -500,6 +697,6 @@ $('#uploadForm').addEventListener('submit', async (event) => {
     updateControls();
   }
 });
-
 void initializeOAuth();
+void initializeDriveAutoUpload();
 void loadHandoffVideo();

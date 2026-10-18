@@ -1,10 +1,13 @@
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
+import { createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
@@ -44,7 +47,7 @@ app.use((req, res, next) => {
   if (!origin || !allowedOrigins.has(origin)) return next();
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With');
   res.setHeader('Access-Control-Expose-Headers', 'X-History-Saved, Content-Disposition');
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -101,6 +104,14 @@ function historyCollection(uid) {
 
 function youtubeIntegrationRef(uid) {
   return firebaseDb.collection('users').doc(uid).collection('integrations').doc('youtube');
+}
+
+function googleDriveIntegrationRef(uid) {
+  return firebaseDb.collection('users').doc(uid).collection('integrations').doc('googleDrive');
+}
+
+function youtubeAutoUploadJobRef(uid) {
+  return firebaseDb.collection('youtubeAutoUploadJobs').doc(uid);
 }
 
 function youtubeOAuthConfig() {
@@ -190,6 +201,233 @@ async function youtubeTokenRequest(parameters) {
     throw error;
   }
   return data;
+}
+
+const GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+const AUTO_UPLOAD_REPO = 'shopppit1-tech/videoteks';
+const AUTO_UPLOAD_WORKFLOW = `${AUTO_UPLOAD_REPO}/.github/workflows/youtube-auto-upload.yml@refs/heads/main`;
+const AUTO_UPLOAD_OIDC_AUDIENCE = 'videoteks-youtube-daily-upload';
+let githubOidcJwks = { expiresAt: 0, keys: [] };
+
+function googleDriveFolderId(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/\/folders\/([A-Za-z0-9_-]+)/) || raw.match(/[?&]id=([A-Za-z0-9_-]+)/);
+  const id = match ? match[1] : raw;
+  return /^[A-Za-z0-9_-]{5,200}$/.test(id) ? id : '';
+}
+
+async function refreshAccessTokenForIntegration(ref, config, integrationName) {
+  const snapshot = await ref.get();
+  const encryptedToken = snapshot.data()?.refreshTokenEncrypted;
+  if (!encryptedToken) throw new Error(`Akun ${integrationName} belum terhubung.`);
+  const refreshToken = decryptYoutubeRefreshToken(encryptedToken, config.encryptionKey);
+  const tokens = await youtubeTokenRequest({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token'
+  });
+  if (!tokens.access_token) throw new Error(`Akses ${integrationName} tidak dapat diperbarui.`);
+  const update = { lastRefreshedAt: Date.now() };
+  if (tokens.refresh_token) update.refreshTokenEncrypted = encryptYoutubeRefreshToken(tokens.refresh_token, config.encryptionKey);
+  await ref.set(update, { merge: true });
+  return tokens.access_token;
+}
+
+async function googleDriveJson(accessToken, url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: { Authorization: `Bearer ${accessToken}`, ...(options.headers || {}) },
+    signal: options.signal || AbortSignal.timeout(30000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error?.message || `Google Drive API gagal (HTTP ${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+async function getGoogleDriveFolder(accessToken, folderId) {
+  const url = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}`);
+  url.searchParams.set('fields', 'id,name,mimeType,trashed');
+  url.searchParams.set('supportsAllDrives', 'true');
+  const folder = await googleDriveJson(accessToken, url.toString());
+  if (folder.mimeType !== 'application/vnd.google-apps.folder' || folder.trashed) throw new Error('Tautan tersebut bukan folder Drive yang aktif.');
+  return folder;
+}
+
+async function findNextDriveVideo(accessToken, folderId, jobRef) {
+  let pageToken = '';
+  do {
+    const url = new URL('https://www.googleapis.com/drive/v3/files');
+    url.searchParams.set('q', `'${folderId}' in parents and trashed = false`);
+    url.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,createdTime,size)');
+    url.searchParams.set('orderBy', 'createdTime,name');
+    url.searchParams.set('pageSize', '100');
+    url.searchParams.set('supportsAllDrives', 'true');
+    url.searchParams.set('includeItemsFromAllDrives', 'true');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    const data = await googleDriveJson(accessToken, url.toString());
+    for (const file of data.files || []) {
+      if (!file.id || !String(file.mimeType || '').startsWith('video/')) continue;
+      const processed = await jobRef.collection('processed').doc(file.id).get();
+      if (!processed.exists) return file;
+    }
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return null;
+}
+
+async function downloadGoogleDriveVideo(accessToken, file) {
+  const expectedSize = Number(file.size || 0);
+  const maximumSize = 500 * 1024 * 1024;
+  if (expectedSize > maximumSize) throw new Error('Video lebih besar dari batas otomatis 500 MB.');
+  const url = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}`);
+  url.searchParams.set('alt', 'media');
+  url.searchParams.set('supportsAllDrives', 'true');
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(20 * 60 * 1000)
+  });
+  if (!response.ok || !response.body) {
+    const details = await response.json().catch(() => ({}));
+    throw new Error(details.error?.message || `Video Drive gagal diunduh (HTTP ${response.status}).`);
+  }
+  const destination = path.join(os.tmpdir(), `videoteks-drive-${crypto.randomUUID()}.video`);
+  try {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
+    const stat = await fs.stat(destination);
+    if (!stat.size || stat.size > maximumSize) throw new Error('Ukuran video Drive tidak valid atau melebihi 500 MB.');
+    return destination;
+  } catch (error) {
+    await fs.rm(destination, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function uploadVideoToYoutube(accessToken, filePath, file, metadata) {
+  const stat = await fs.stat(filePath);
+  const mimeType = /^video\/[a-z0-9.+-]+$/i.test(file.mimeType || '') ? file.mimeType : 'application/octet-stream';
+  const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Upload-Content-Type': mimeType,
+      'X-Upload-Content-Length': String(stat.size)
+    },
+    body: JSON.stringify(metadata),
+    signal: AbortSignal.timeout(30000)
+  });
+  if (!init.ok) {
+    const data = await init.json().catch(() => ({}));
+    throw new Error(data.error?.message || `YouTube menolak pembuatan unggahan (HTTP ${init.status}).`);
+  }
+  const uploadUrl = init.headers.get('location');
+  if (!uploadUrl || new URL(uploadUrl).hostname !== 'www.googleapis.com') throw new Error('YouTube tidak memberikan URL unggah yang valid.');
+  const uploaded = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': mimeType, 'Content-Length': String(stat.size) },
+    body: Readable.toWeb(createReadStream(filePath)),
+    duplex: 'half',
+    signal: AbortSignal.timeout(30 * 60 * 1000)
+  });
+  const result = await uploaded.json().catch(() => ({}));
+  if (!uploaded.ok || !result.id) throw new Error(result.error?.message || `Unggah YouTube gagal (HTTP ${uploaded.status}).`);
+  return result;
+}
+
+async function verifyGithubActionsOidcToken(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3 || token.length > 12000) throw new Error('Token otomatis tidak valid.');
+  const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  if (header.alg !== 'RS256' || !header.kid) throw new Error('Tanda tangan token otomatis tidak valid.');
+  if (githubOidcJwks.expiresAt < Date.now()) {
+    const response = await fetch('https://token.actions.githubusercontent.com/.well-known/jwks', { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error('Kunci GitHub Actions tidak dapat diverifikasi.');
+    const data = await response.json();
+    githubOidcJwks = { expiresAt: Date.now() + 15 * 60 * 1000, keys: data.keys || [] };
+  }
+  const jwk = githubOidcJwks.keys.find((key) => key.kid === header.kid && key.kty === 'RSA');
+  if (!jwk || !crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), crypto.createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(parts[2], 'base64url'))) {
+    throw new Error('Tanda tangan token GitHub Actions tidak valid.');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const audience = Array.isArray(claims.aud) ? claims.aud.includes(AUTO_UPLOAD_OIDC_AUDIENCE) : claims.aud === AUTO_UPLOAD_OIDC_AUDIENCE;
+  if (claims.iss !== 'https://token.actions.githubusercontent.com' || !audience || claims.repository !== AUTO_UPLOAD_REPO || claims.ref !== 'refs/heads/main' || claims.workflow_ref !== AUTO_UPLOAD_WORKFLOW || claims.exp <= now || claims.nbf > now || !['schedule', 'workflow_dispatch'].includes(claims.event_name)) {
+    throw new Error('Workflow otomatis tidak memiliki izin untuk menjalankan antrean ini.');
+  }
+  return claims;
+}
+
+function jakartaDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+async function processOneAutoUpload(jobSnapshot) {
+  const uid = jobSnapshot.id;
+  const jobRef = youtubeAutoUploadJobRef(uid);
+  const today = jakartaDate();
+  const leaseId = crypto.randomUUID();
+  const now = Date.now();
+  const claim = await firebaseDb.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(jobRef);
+    const current = snapshot.data() || {};
+    if (!snapshot.exists || !current.enabled) return { status: 'disabled' };
+    if (current.lastUploadDate === today) return { status: 'already_uploaded' };
+    if (Number(current.processingUntil || 0) > now) return { status: 'busy' };
+    transaction.set(jobRef, { processing: true, processingStartedAt: now, processingUntil: now + 45 * 60 * 1000, leaseId, updatedAt: now }, { merge: true });
+    return { status: 'claimed', settings: current };
+  });
+  if (claim.status !== 'claimed') return { status: claim.status };
+  let videoPath = null;
+  try {
+    const config = youtubeOAuthConfig();
+    const seoConfig = youtubeSeoAIConfig();
+    if (!config) throw new Error('Integrasi Google OAuth belum dikonfigurasi di server.');
+    if (!seoConfig) throw new Error('Gemini SEO YouTube belum dikonfigurasi di server.');
+    const folderId = googleDriveFolderId(claim.settings.folderId);
+    if (!folderId) throw new Error('Folder Drive pada antrean tidak valid.');
+    const [driveAccessToken, youtubeAccessToken] = await Promise.all([
+      refreshAccessTokenForIntegration(googleDriveIntegrationRef(uid), config, 'Google Drive'),
+      refreshAccessTokenForIntegration(youtubeIntegrationRef(uid), config, 'YouTube')
+    ]);
+    const file = await findNextDriveVideo(driveAccessToken, folderId, jobRef);
+    if (!file) {
+      await jobRef.set({ processing: false, processingUntil: 0, status: 'empty', lastCheckedAt: Date.now(), lastError: '', updatedAt: Date.now() }, { merge: true });
+      return { status: 'empty' };
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(file.id)) throw new Error('ID video Drive tidak valid.');
+    videoPath = await downloadGoogleDriveVideo(driveAccessToken, file);
+    const metadata = await generateYoutubeSeoFromFile(videoPath, file.name, '', '', seoConfig);
+    const uploaded = await uploadVideoToYoutube(youtubeAccessToken, videoPath, file, {
+      snippet: { title: metadata.title, description: metadata.description, ...(metadata.tags.length ? { tags: metadata.tags } : {}) },
+      status: { privacyStatus: 'public' }
+    });
+    const processedRef = jobRef.collection('processed').doc(file.id);
+    await firebaseDb.runTransaction(async (transaction) => {
+      const [currentSnapshot, processedSnapshot] = await Promise.all([transaction.get(jobRef), transaction.get(processedRef)]);
+      if (currentSnapshot.data()?.leaseId !== leaseId) throw new Error('Antrean berubah saat unggahan berjalan; periksa status video sebelum mencoba lagi.');
+      if (processedSnapshot.exists) throw new Error('Video Drive ini sudah pernah ditandai selesai.');
+      const completedAt = Date.now();
+      transaction.set(processedRef, { driveFileId: file.id, fileName: String(file.name || '').slice(0, 180), youtubeVideoId: uploaded.id, title: metadata.title, uploadedAt: completedAt, uploadDate: today });
+      transaction.set(jobRef, { processing: false, processingUntil: 0, leaseId: '', status: 'uploaded', lastUploadDate: today, lastUploadedAt: completedAt, lastFileName: String(file.name || '').slice(0, 180), lastTitle: metadata.title, lastVideoId: uploaded.id, lastError: '', updatedAt: completedAt }, { merge: true });
+    });
+    return { status: 'uploaded' };
+  } catch (error) {
+    console.error('[youtube-auto-upload] job failed:', error.message || error.name || 'Error');
+    await jobRef.get().then((snapshot) => {
+      if (snapshot.data()?.leaseId === leaseId) return jobRef.set({ processing: false, processingUntil: 0, leaseId: '', status: 'error', lastError: String(error.message || 'Unggah otomatis gagal.').slice(0, 500), lastAttemptAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+    }).catch(() => {});
+    return { status: 'error' };
+  } finally {
+    if (videoPath) await fs.rm(videoPath, { force: true }).catch(() => {});
+  }
 }
 
 function historyFailureMessage(error, action) {
@@ -847,6 +1085,81 @@ app.post('/api/youtube/seo-video-metadata', requireFirebaseUser, upload.single('
   }
 });
 
+async function generateYoutubeSeoFromFile(filePath, filename, topic, language, config) {
+  const frameId = crypto.randomUUID();
+  const framePattern = path.join(os.tmpdir(), `videoteks-auto-seo-${frameId}-%02d.jpg`);
+  const framePaths = [];
+  const allFramePaths = Array.from({ length: 12 }, (_, index) => path.join(os.tmpdir(), `videoteks-auto-seo-${frameId}-${String(index).padStart(2, '0')}.jpg`));
+  const audioPath = `${filePath}.auto-seo.mp3`;
+  let geminiAudioFile = null;
+  try {
+    const probe = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath]);
+    const duration = Number.parseFloat(probe.stdout.trim());
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error('Video Drive tidak memiliki durasi yang valid.');
+    const frameFps = Math.min(1, 12 / duration);
+    await exec('ffmpeg', ['-y', '-i', filePath, '-vf', `fps=${frameFps.toFixed(6)},scale=640:-2`, '-frames:v', '12', '-q:v', '7', '-start_number', '0', framePattern]);
+    for (const framePath of allFramePaths) {
+      try { await fs.stat(framePath); framePaths.push(framePath); } catch { break; }
+    }
+
+    const audioProbe = await exec('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index', '-of', 'csv=p=0', filePath]);
+    const hasAudio = Boolean(audioProbe.stdout.trim());
+    let audioPart = null;
+    let audioContext = 'Tidak ada audio; gunakan bukti visual dari video.';
+    if (hasAudio) {
+      if (duration <= 1200) {
+        await exec('ffmpeg', ['-y', '-i', filePath, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '32k', '-f', 'mp3', audioPath]);
+        audioContext = 'Audio penuh video disertakan.';
+      } else {
+        const windowSeconds = 240;
+        const starts = [...new Set([0, Math.max(0, Math.floor(duration / 2 - windowSeconds / 2)), Math.max(0, Math.floor(duration - windowSeconds))])];
+        const splitOutputs = starts.map((_, index) => `[source${index}]`).join('');
+        const splitFilter = `[0:a]asplit=${starts.length}${splitOutputs}`;
+        const trimFilters = starts.map((start, index) => `[source${index}]atrim=start=${start}:end=${Math.min(duration, start + windowSeconds)},asetpts=PTS-STARTPTS[audio${index}]`).join(';');
+        const concatInputs = starts.map((_, index) => `[audio${index}]`).join('');
+        const filter = `${splitFilter};${trimFilters};${concatInputs}concat=n=${starts.length}:v=0:a=1[out]`;
+        await exec('ffmpeg', ['-y', '-i', filePath, '-filter_complex', filter, '-map', '[out]', '-vn', '-ac', '1', '-ar', '16000', '-b:a', '32k', '-f', 'mp3', audioPath]);
+        audioContext = 'Audio diambil dari bagian awal, tengah, dan akhir video.';
+      }
+      const audioStats = await fs.stat(audioPath);
+      if (audioStats.size > 0 && audioStats.size <= INLINE_AUDIO_MAX_BYTES) {
+        audioPart = { inlineData: { mimeType: 'audio/mpeg', data: await fs.readFile(audioPath, 'base64') } };
+      } else if (audioStats.size > INLINE_AUDIO_MAX_BYTES) {
+        geminiAudioFile = await uploadToGemini(audioPath, 'audio/mpeg', config.apiKey);
+        audioPart = { fileData: { fileUri: geminiAudioFile.uri, mimeType: geminiAudioFile.mimeType || 'audio/mpeg' } };
+      }
+    }
+    if (!framePaths.length && !audioPart) throw new Error('Video Drive tidak berisi audio atau frame yang dapat dianalisis.');
+    const sampledTimes = framePaths.map((_, index) => {
+      const seconds = Math.min(duration, Math.floor(index / frameFps));
+      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    });
+    const prompt = [
+      YOUTUBE_SEO_EDITOR_BRIEF,
+      'Analisis audio dan frame video sebagai bukti utama. Jangan mengarang fakta.',
+      `Panduan audio: ${audioContext}`,
+      framePaths.length ? `Frame sampel berurutan pada waktu: ${sampledTimes.join(', ')}.` : 'Frame visual tidak tersedia.',
+      filename ? `Nama file (petunjuk sekunder): ${filename.slice(0, 180)}` : '',
+      topic ? `Kata kunci tambahan: ${topic.slice(0, 240)}` : '',
+      language ? `Tulis metadata dalam bahasa ${language.slice(0, 80)}.` : 'Gunakan bahasa Indonesia.',
+      'Kembalikan hanya JSON valid: {"title":"...","description":"...","tags":["..."]}.'
+    ].filter(Boolean).join('\n\n');
+    const parts = [{ text: prompt }];
+    if (audioPart) parts.push(audioPart);
+    for (const framePath of framePaths) parts.push({ inlineData: { mimeType: 'image/jpeg', data: await fs.readFile(framePath, 'base64') } });
+    const result = await geminiRequest(config.model, { contents: [{ parts }], generationConfig: { temperature: 0.4, responseMimeType: 'application/json', maxOutputTokens: 900 } }, config.apiKey, 60000, 1);
+    const metadata = parseSeoMetadata(responseText(result));
+    const title = String(metadata?.title || '').trim().slice(0, 100);
+    const description = String(metadata?.description || '').trim().slice(0, 5000);
+    const tags = normalizeSeoTags(metadata?.tags);
+    if (!title || !description) throw new Error('Gemini tidak mengembalikan judul dan deskripsi yang valid.');
+    return { title, description, tags };
+  } finally {
+    await cleanup(audioPath, ...allFramePaths);
+    if (geminiAudioFile?.name) await deleteGeminiFile(geminiAudioFile.name, config.apiKey);
+  }
+}
+
 app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
   const config = youtubeSeoAIConfig();
   if (!config) return res.status(503).json({ error: 'Gemini SEO YouTube belum dikonfigurasi. Isi GEMINI_YOUTUBE_API_KEY khusus YouTube di server.' });
@@ -988,10 +1301,183 @@ app.delete('/api/youtube/connection', requireFirebaseUser, async (req, res) => {
       }
     }
     await ref.delete();
+    await youtubeAutoUploadJobRef(req.firebaseUser.uid).set({ enabled: false, processing: false, processingUntil: 0, status: 'disabled', updatedAt: Date.now() }, { merge: true });
     res.json({ ok: true });
   } catch (error) {
     console.error('[youtube] gagal menghapus koneksi:', error.message);
     res.status(500).json({ error: 'Koneksi YouTube gagal dilepas.' });
+  }
+});
+
+app.get('/api/youtube/drive/status', requireFirebaseUser, async (req, res) => {
+  const config = youtubeOAuthConfig();
+  try {
+    const snapshot = await googleDriveIntegrationRef(req.firebaseUser.uid).get();
+    res.set('Cache-Control', 'no-store');
+    res.json({ configured: Boolean(config), connected: Boolean(snapshot.data()?.refreshTokenEncrypted), clientId: config?.clientId || null });
+  } catch (error) {
+    console.error('[youtube-drive] gagal membaca status koneksi:', error.message);
+    res.status(500).json({ error: 'Status koneksi Google Drive gagal dimuat.' });
+  }
+});
+
+app.post('/api/youtube/drive/connect', requireFirebaseUser, async (req, res) => {
+  const config = youtubeOAuthConfig();
+  if (!config) return res.status(503).json({ error: 'Integrasi Google belum dikonfigurasi di server.' });
+  const origin = req.get('origin');
+  if (!origin || !allowedOrigins.has(origin) || req.get('X-Requested-With') !== 'XmlHttpRequest') {
+    return res.status(403).json({ error: 'Permintaan koneksi Google Drive tidak valid.' });
+  }
+  if (YOUTUBE_REDIRECT_URI !== origin) return res.status(500).json({ error: 'YOUTUBE_REDIRECT_URI harus sama persis dengan origin aplikasi.' });
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!code || code.length > 4096) return res.status(400).json({ error: 'Kode otorisasi Google Drive tidak valid.' });
+  try {
+    const tokens = await youtubeTokenRequest({
+      code,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: YOUTUBE_REDIRECT_URI,
+      grant_type: 'authorization_code'
+    });
+    const grantedScopes = String(tokens.scope || '').split(/\s+/);
+    if (!tokens.access_token || (tokens.scope && !grantedScopes.includes(GOOGLE_DRIVE_READ_SCOPE))) {
+      return res.status(403).json({ error: 'Google tidak memberikan izin baca folder Google Drive yang diperlukan.' });
+    }
+    const ref = googleDriveIntegrationRef(req.firebaseUser.uid);
+    const existing = await ref.get();
+    let refreshToken = tokens.refresh_token;
+    if (!refreshToken && existing.data()?.refreshTokenEncrypted) refreshToken = decryptYoutubeRefreshToken(existing.data().refreshTokenEncrypted, config.encryptionKey);
+    if (!refreshToken) return res.status(409).json({ error: 'Google belum memberikan izin akses jangka panjang. Setujui akses Drive dengan memilih akun dan memberi izin.' });
+    await ref.set({
+      refreshTokenEncrypted: encryptYoutubeRefreshToken(refreshToken, config.encryptionKey),
+      scopes: grantedScopes,
+      connectedAt: existing.data()?.connectedAt || Date.now(),
+      updatedAt: Date.now()
+    }, { merge: true });
+    res.json({ connected: true });
+  } catch (error) {
+    console.error('[youtube-drive] gagal menyambungkan Drive:', error.oauthError || error.message);
+    if (error.oauthError === 'invalid_client') return res.status(502).json({ error: 'Kredensial OAuth Google tidak valid di server.' });
+    res.status(502).json({ error: 'Google Drive gagal disambungkan. Periksa izin Drive API lalu coba lagi.' });
+  }
+});
+
+app.delete('/api/youtube/drive/connection', requireFirebaseUser, async (req, res) => {
+  const ref = googleDriveIntegrationRef(req.firebaseUser.uid);
+  try {
+    const snapshot = await ref.get();
+    const config = youtubeOAuthConfig();
+    const encryptedToken = snapshot.data()?.refreshTokenEncrypted;
+    if (config && encryptedToken) {
+      try {
+        const refreshToken = decryptYoutubeRefreshToken(encryptedToken, config.encryptionKey);
+        await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(refreshToken)}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(10000) });
+      } catch (error) {
+        console.warn('[youtube-drive] pencabutan izin Google gagal; token lokal tetap dihapus:', error.message);
+      }
+    }
+    await ref.delete();
+    await youtubeAutoUploadJobRef(req.firebaseUser.uid).set({ enabled: false, processing: false, processingUntil: 0, status: 'disabled', updatedAt: Date.now() }, { merge: true });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[youtube-drive] gagal melepas koneksi:', error.message);
+    res.status(500).json({ error: 'Koneksi Google Drive gagal dilepas.' });
+  }
+});
+
+app.get('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
+  try {
+    const [jobSnapshot, driveSnapshot, youtubeSnapshot] = await Promise.all([
+      youtubeAutoUploadJobRef(req.firebaseUser.uid).get(),
+      googleDriveIntegrationRef(req.firebaseUser.uid).get(),
+      youtubeIntegrationRef(req.firebaseUser.uid).get()
+    ]);
+    const job = jobSnapshot.data() || {};
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      enabled: Boolean(job.enabled),
+      folderId: job.folderId || '',
+      folderName: job.folderName || '',
+      connectedDrive: Boolean(driveSnapshot.data()?.refreshTokenEncrypted),
+      connectedYoutube: Boolean(youtubeSnapshot.data()?.refreshTokenEncrypted),
+      status: job.status || 'off',
+      lastError: job.lastError || '',
+      lastUploadedAt: job.lastUploadedAt || null,
+      lastFileName: job.lastFileName || '',
+      lastTitle: job.lastTitle || '',
+      lastVideoId: job.lastVideoId || null,
+      scheduleTime: '10:05',
+      timeZone: 'Asia/Jakarta',
+      privacyStatus: 'public'
+    });
+  } catch (error) {
+    console.error('[youtube-auto-upload] gagal membaca pengaturan:', error.message);
+    res.status(500).json({ error: 'Pengaturan upload otomatis gagal dimuat.' });
+  }
+});
+
+app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
+  const uid = req.firebaseUser.uid;
+  const enabled = req.body?.enabled === true;
+  const config = youtubeOAuthConfig();
+  try {
+    const existingSnapshot = await youtubeAutoUploadJobRef(uid).get();
+    const existing = existingSnapshot.data() || {};
+    const folderInput = typeof req.body?.folderId === 'string' ? req.body.folderId : existing.folderId;
+    const folderId = googleDriveFolderId(folderInput);
+    if (enabled && !folderId) return res.status(400).json({ error: 'Tempel tautan atau ID folder Google Drive terlebih dahulu.' });
+    let folderName = folderId ? (existing.folderName || '') : '';
+    if (enabled) {
+      if (!config) return res.status(503).json({ error: 'Integrasi Google belum dikonfigurasi di server.' });
+      if (!youtubeSeoAIConfig()) return res.status(503).json({ error: 'Gemini SEO YouTube belum siap. Periksa key dan kuota sebelum mengaktifkan upload otomatis.' });
+      const [driveSnapshot, youtubeSnapshot] = await Promise.all([googleDriveIntegrationRef(uid).get(), youtubeIntegrationRef(uid).get()]);
+      if (!driveSnapshot.data()?.refreshTokenEncrypted) return res.status(409).json({ error: 'Hubungkan Google Drive terlebih dahulu.' });
+      if (!youtubeSnapshot.data()?.refreshTokenEncrypted) return res.status(409).json({ error: 'Hubungkan akun YouTube terlebih dahulu.' });
+      const accessToken = await refreshAccessTokenForIntegration(googleDriveIntegrationRef(uid), config, 'Google Drive');
+      const folder = await getGoogleDriveFolder(accessToken, folderId);
+      folderName = String(folder.name || '').slice(0, 180);
+    }
+    await youtubeAutoUploadJobRef(uid).set({
+      userId: uid,
+      folderId: folderId || '',
+      folderName,
+      enabled,
+      scheduleTime: '10:05',
+      timeZone: 'Asia/Jakarta',
+      privacyStatus: 'public',
+      status: enabled ? 'waiting' : 'disabled',
+      lastError: '',
+      updatedAt: Date.now()
+    }, { merge: true });
+    res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '10:05', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
+  } catch (error) {
+    console.error('[youtube-auto-upload] gagal menyimpan pengaturan:', error.message || error.name);
+    res.status(error.status === 401 || error.status === 403 ? 400 : 502).json({ error: error.message || 'Pengaturan upload otomatis gagal disimpan.' });
+  }
+});
+
+app.post('/api/internal/youtube-auto-upload/run', async (req, res) => {
+  try {
+    const token = /^Bearer\s+(.+)$/i.exec(req.get('authorization') || '')?.[1];
+    if (!token) return res.status(401).json({ error: 'Workflow otomatis tidak terautentikasi.' });
+    await verifyGithubActionsOidcToken(token);
+  } catch (error) {
+    return res.status(401).json({ error: error.message || 'Workflow otomatis tidak terautentikasi.' });
+  }
+  if (!firebaseDb) return res.status(503).json({ error: 'Firestore belum dikonfigurasi untuk antrean otomatis.' });
+  try {
+    const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
+    const results = [];
+    for (const job of jobs.docs) results.push(await processOneAutoUpload(job));
+    const summary = results.reduce((counts, result) => {
+      counts[result.status] = (counts[result.status] || 0) + 1;
+      return counts;
+    }, {});
+    console.info('[youtube-auto-upload] daily run:', JSON.stringify(summary));
+    res.set('Cache-Control', 'no-store').json({ ok: true, summary });
+  } catch (error) {
+    console.error('[youtube-auto-upload] daily run failed:', error.message || error.name);
+    res.status(500).json({ error: 'Pemrosesan antrean YouTube harian gagal.' });
   }
 });
 
