@@ -83,8 +83,8 @@ function youtubeOAuthConfig() {
 }
 
 function youtubeSeoAIConfig() {
-  // SEO YouTube wajib memakai kredensial khusus; jangan fallback ke key transkripsi/terjemahan.
-  const apiKey = String(process.env.GEMINI_YOUTUBE_API_KEY || '').trim();
+  // Hanya terima nama key khusus YouTube; jangan fallback ke key transkripsi/terjemahan.
+  const apiKey = String(process.env.GEMINI_YOUTUBE_API_KEY || process.env.GEMINI_YOUTUBE_KEY || '').trim();
   const model = String(process.env.GEMINI_YOUTUBE_MODEL || 'gemini-3.8-flash').trim();
   if (!apiKey || !model) return null;
   return { apiKey, model };
