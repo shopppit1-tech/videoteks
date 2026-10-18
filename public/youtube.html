@@ -57,8 +57,6 @@
     </nav>
     <header class="hero">
       <p class="eyebrow">VIDEO SHORTS &amp; VIDEO</p>
-      <h1>Upload langsung ke YouTube</h1>
-      <p>Kirim video hasil subtitle/terjemahan ke YouTube, lalu siapkan metadata SEO secara terpisah.</p>
     </header>
     <section class="card" aria-labelledby="accountTitle">
       <h2 id="accountTitle" class="card-title">Akun YouTube</h2>
@@ -76,10 +74,9 @@
     </section>
     <form id="uploadForm" class="card">
       <h2 class="card-title">Detail video</h2>
-      <p class="muted">Untuk unggah langsung, Gemini membuat metadata dari audio dan cuplikan gambar isi video. Video dari Subtitle Video memakai teks subtitle/terjemahan sebagai konteks.</p>
       <label class="file-pick" for="videoFile">
         <span class="file-icon" aria-hidden="true">＋</span>
-        <span class="file-copy"><strong>Pilih video dari perangkat</strong><small>Untuk analisis SEO, video diproses sementara di server. File asli dikirim ke YouTube saat Anda menekan Upload.</small><span id="fileName" class="file-name">Belum ada video dipilih</span></span>
+        <span class="file-copy"><strong>Pilih video dari perangkat</strong><span id="fileName" class="file-name">Belum ada video dipilih</span></span>
       </label>
       <input id="videoFile" class="sr-only" type="file" accept="video/*">
       <p id="handoffHint" class="handoff-hint" hidden></p>
@@ -96,19 +93,16 @@
       <div class="field">
         <label for="seoTopic">Topik atau kata kunci SEO (opsional)</label>
         <input id="seoTopic" class="text single" type="text" maxlength="240" placeholder="Contoh: tips belajar bahasa Inggris">
-        <small id="seoHint">Pilih video langsung dan setujui analisis audio/frame agar metadata dibuat dari isi video.</small>
+        <small id="seoHint"></small>
         <button id="seoButton" class="btn secondary seo-button" type="button">Buat judul &amp; deskripsi SEO (Gemini)</button>
-        <small id="seoTagsHint">Tag SEO dibuat dari isi video atau teks subtitle/terjemahan.</small>
-        <label class="rights"><input id="seoContentConsent" type="checkbox"><span>Saya setuju video ini diproses sementara di server untuk mengekstrak audio dan frame sampel, lalu hasil ekstraknya dikirim ke Gemini khusus SEO YouTube. Video utuh tidak dikirim ke Gemini dan file sementara dihapus setelah analisis.</span></label>
+        <small id="seoTagsHint"></small>
+        <input id="seoContentConsent" type="checkbox" checked hidden>
       </div>
-      <div class="field">
-        <label for="privacyStatus">Siapa yang dapat menonton?</label>
-        <select id="privacyStatus" class="select">
-          <option value="private" selected>Privat — hanya Anda</option>
-          <option value="unlisted">Tidak publik — hanya yang memiliki tautan</option>
-          <option value="public">Publik — dapat ditemukan semua orang</option>
-        </select>
-      </div>
+      <select id="privacyStatus" class="select" hidden aria-hidden="true">
+        <option value="private" selected>Privat — hanya Anda</option>
+        <option value="unlisted">Tidak publik — hanya yang memiliki tautan</option>
+        <option value="public">Publik — dapat ditemukan semua orang</option>
+      </select>
       <p class="privacy-note">Untuk SEO, video diproses sementara di server untuk mengambil audio dan frame sampel; hanya hasil ekstraksi itu yang dikirim ke Gemini khusus YouTube, bukan video utuh. File sementara dihapus setelah analisis. Video asli, judul, deskripsi, dan pilihan privasi dikirim ke YouTube saat Anda menekan Upload. Pastikan Anda memiliki hak untuk mengunggah konten tersebut.</p>
       <label class="rights"><input id="rightsCheck" type="checkbox"><span>Saya memiliki hak atau izin untuk mengunggah video ini dan bertanggung jawab atas kontennya.</span></label>
       <button id="uploadButton" class="btn upload-btn" type="submit" disabled>Upload ke YouTube</button>
@@ -117,6 +111,6 @@
       <a id="successLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat video yang diunggah</a>
     </form>
   </main>
-  <script type="module" src="youtube.js?v=seo-video-content-1"></script>
+  <script type="module" src="youtube.js?v=seo-video-content-2"></script>
 </body>
 </html>

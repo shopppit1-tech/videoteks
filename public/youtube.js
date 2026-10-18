@@ -264,7 +264,7 @@ async function initializeSeo() {
       const status = await apiRequest('/api/youtube/seo-status', { method: 'GET' });
       seoAiConfigured = Boolean(status.configured);
       $('#seoHint').textContent = seoAiConfigured
-        ? `Gemini YouTube siap${status.model ? ` (${status.model})` : ''}. Untuk unggah langsung, setujui analisis audio dan frame agar metadata dibuat dari isi video; subtitle tetap dipakai bila tersedia.`
+        ? ''
         : 'Isi GEMINI_YOUTUBE_API_KEY khusus SEO YouTube di Render; key terjemahan tidak dipakai.';
       updateControls();
       void maybeGenerateSeoMetadata();
@@ -338,7 +338,7 @@ fileInput.addEventListener('change', () => {
   if (!loadingHandoff) {
     sourceCaptions = '';
     sourceLanguage = '';
-    seoContentConsent.checked = false;
+    seoContentConsent.checked = true;
     $('#handoffHint').hidden = true;
   }
   if (!selectedFile) {
