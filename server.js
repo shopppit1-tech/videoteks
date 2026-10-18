@@ -1051,7 +1051,7 @@ app.post('/api/voice/video-narration', requireFirebaseUser, upload.single('video
     if (!framePaths.length && !audioPart) return res.status(422).json({ error: 'Video tidak memiliki audio atau cuplikan gambar yang dapat dianalisis.' });
 
     const targetWords = Math.min(650, Math.max(4, Math.round(duration * 2)));
-    const minimumNarrationWords = Math.max(3, Math.ceil(targetWords * 0.6));
+    const minimumNarrationWords = duration <= 30 ? 3 : Math.max(3, Math.ceil(targetWords * 0.6));
     const sampledTimes = framePaths.map((_, index) => {
       const seconds = Math.min(duration, Math.floor(index / frameFps));
       return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
