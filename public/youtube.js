@@ -126,16 +126,18 @@ async function apiRequest(url, options = {}) {
 
 function setConnected(token) {
   accessToken = token;
-  $('#accountLabel').textContent = 'Terhubung otomatis';
-  $('#accountHint').textContent = 'Akun YouTube tersimpan dengan aman. VideoTeks akan memulihkan akses saat Anda kembali.';
-  setStatus('Akun YouTube siap. Pilih video dan lengkapi detail unggahan.');
+  $('#accountLabel').textContent = 'Online';
+  $('#accountHint').textContent = '';
+  connectButton.hidden = true;
+  setStatus('Online. Pilih video.');
   updateControls();
 }
 
 function setDisconnected(message = 'Akun YouTube belum terhubung.') {
   accessToken = null;
   $('#accountLabel').textContent = 'Belum terhubung';
-  $('#accountHint').textContent = 'Hubungkan sekali untuk memulihkan akses otomatis saat Anda kembali.';
+  $('#accountHint').textContent = '';
+  connectButton.hidden = false;
   setStatus(message);
   updateControls();
 }

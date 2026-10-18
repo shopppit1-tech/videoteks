@@ -1,4 +1,4 @@
-const CACHE = 'videoteks-shell-v52';
+const CACHE = 'videoteks-shell-v53';
 const BASE_URL = new URL('./', self.location.href);
 const HOME_URL = new URL('index.html', BASE_URL).href;
 const SHELL_FILES = [
@@ -25,7 +25,7 @@ const SHELL_FILES = [
   'voice.js',
   'youtube.html',
   'youtube.js',
-  'youtube.js?v=seo-video-content-3',
+  'youtube.js?v=seo-video-content-4',
   'youtube-handoff.js',
   'history.html',
   'history.js',
