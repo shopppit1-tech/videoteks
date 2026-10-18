@@ -266,6 +266,7 @@ async function initializeSeo() {
       $('#seoHint').textContent = seoAiConfigured
         ? ''
         : 'Isi GEMINI_YOUTUBE_API_KEY khusus SEO YouTube di Render; key terjemahan tidak dipakai.';
+      if (!seoAiConfigured) setStatus('Metadata SEO otomatis belum tersedia.', true);
       updateControls();
       void maybeGenerateSeoMetadata();
       return;
@@ -276,6 +277,7 @@ async function initializeSeo() {
   }
   seoAiConfigured = false;
   $('#seoHint').textContent = lastError?.message || 'Status AI SEO belum dapat diperiksa.';
+  setStatus('Status SEO belum tersedia.', true);
   updateControls();
 }
 
@@ -411,11 +413,11 @@ async function generateSeoMetadata() {
     descriptionInput.value = String(data.description || '').slice(0, 5000);
     seoTags = Array.isArray(data.tags) ? data.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
     $('#seoTagsHint').textContent = seoTags.length
-      ? `Tag otomatis: ${seoTags.join(', ')}`
+      ? `Tag SEO siap (${seoTags.length})`
       : 'Tidak ada tag yang dikembalikan AI.';
     titleInput.dispatchEvent(new Event('input'));
     descriptionInput.dispatchEvent(new Event('input'));
-    setStatus('Judul, deskripsi, dan tag SEO sudah dibuat otomatis. Anda tinggal menekan Upload ke YouTube.');
+    setStatus('SEO siap. Tinjau, lalu tekan Upload.');
   } catch (error) {
     setStatus(error.message || 'AI SEO gagal membuat metadata.', true);
   } finally {

@@ -55,16 +55,13 @@
       <a href="voice.html">Suara AI</a>
       <a class="active" href="youtube.html" aria-current="page">YouTube</a>
     </nav>
-    <header class="hero">
-      <p class="eyebrow">VIDEO SHORTS &amp; VIDEO</p>
-    </header>
     <section class="card" aria-labelledby="accountTitle">
       <h2 id="accountTitle" class="card-title">Akun YouTube</h2>
       <div class="account-row">
         <div class="account-mark" aria-hidden="true">▶</div>
         <div class="account-copy">
           <strong id="accountLabel">Belum terhubung</strong>
-          <small id="accountHint">Akses unggah hanya diminta saat Anda memilih untuk menghubungkan akun.</small>
+          <small id="accountHint" hidden></small>
         </div>
         <div class="account-actions">
           <button id="connectButton" class="btn" type="button" disabled>Hubungkan akun</button>
@@ -90,14 +87,14 @@
         <textarea id="videoDescription" class="text description" maxlength="5000" placeholder="Tambahkan konteks, tautan, atau tagar untuk video"></textarea>
         <small><span id="descriptionCount">0</span>/5.000 karakter</small>
       </div>
-      <div class="field">
+      <div class="field" hidden>
         <label for="seoTopic">Topik atau kata kunci SEO (opsional)</label>
         <input id="seoTopic" class="text single" type="text" maxlength="240" placeholder="Contoh: tips belajar bahasa Inggris">
         <small id="seoHint"></small>
         <button id="seoButton" class="btn secondary seo-button" type="button">Buat judul &amp; deskripsi SEO (Gemini)</button>
-        <small id="seoTagsHint"></small>
-        <input id="seoContentConsent" type="checkbox" checked hidden>
       </div>
+      <small id="seoTagsHint" class="muted"></small>
+      <input id="seoContentConsent" type="checkbox" checked hidden>
       <select id="privacyStatus" class="select" hidden aria-hidden="true">
         <option value="private" selected>Privat — hanya Anda</option>
         <option value="unlisted">Tidak publik — hanya yang memiliki tautan</option>
@@ -106,10 +103,10 @@
       <input id="rightsCheck" type="checkbox" checked hidden>
       <button id="uploadButton" class="btn upload-btn" type="submit" disabled>Upload ke YouTube</button>
       <div id="progress" class="progress" hidden><div id="progressFill" class="progress-fill"></div></div>
-      <div id="status" class="status" aria-live="polite">Hubungkan akun dan pilih video untuk memulai.</div>
+      <div id="status" class="status" aria-live="polite">Pilih video untuk membuat metadata otomatis.</div>
       <a id="successLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat video yang diunggah</a>
     </form>
   </main>
-  <script type="module" src="youtube.js?v=seo-video-content-2"></script>
+  <script type="module" src="youtube.js?v=seo-video-content-3"></script>
 </body>
 </html>
