@@ -68,7 +68,7 @@ generateBtn.onclick = async () => {
     audioUrl = URL.createObjectURL(blob);
     audioResult.src = audioUrl;
     downloadLink.href = audioUrl;
-    audioHandoff.href = 'audio.html?generated=1';
+    audioHandoff.href = 'audio.html?generated=1&standalone=1';
     try { await saveAudioForHandoff(blob); } catch { /* unduhan tetap tersedia jika penyimpanan browser tidak tersedia */ }
     result.hidden = false;
     const historyStatus = response.headers.get('X-History-Saved') === 'true' ? 'Riwayat tersimpan.' : 'Riwayat belum tersimpan.';

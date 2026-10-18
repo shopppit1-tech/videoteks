@@ -62,9 +62,9 @@ h1{margin:0;font-size:clamp(25px,7vw,34px);line-height:1.08;letter-spacing:-.8px
 <header class="auth-bar"><div class="auth-bar__actions"><a href="history.html">Riwayat</a><div class="profile-wrap"><button class="profile-button" type="button" data-profile-trigger aria-label="Buka menu profil" aria-haspopup="menu" aria-expanded="false" aria-controls="profileMenu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5.5 20c.7-3.8 3-5.7 6.5-5.7s5.8 1.9 6.5 5.7"></path></svg></button><div id="profileMenu" class="profile-menu" data-profile-menu role="menu" hidden><p class="profile-email" data-account-email>Memuat email…</p><a href="terms.html" role="menuitem">Syarat Penggunaan / Terms of Use</a><a href="privacy.html" role="menuitem">Kebijakan Privasi</a><a href="delete-account.html" role="menuitem">Hapus akun &amp; data</a><button class="profile-menu__signout" type="button" data-sign-out role="menuitem">Keluar</button></div></div></div></header>
 <main class="app">
   <nav class="page-nav" aria-label="Pilih fitur">
-    <a href="app.html">Subtitle Video</a>
-    <a class="active" href="audio.html" aria-current="page">Ganti Audio</a>
-    <a href="voice.html">Suara AI</a>
+    <a href="app.html?standalone=1">Subtitle Video</a>
+    <a class="active" href="audio.html?standalone=1" aria-current="page">Ganti Audio</a>
+    <a href="voice.html?standalone=1">Suara AI</a>
     <a href="youtube.html">YouTube</a>
   </nav>
   <header class="hero">
@@ -108,7 +108,7 @@ h1{margin:0;font-size:clamp(25px,7vw,34px);line-height:1.08;letter-spacing:-.8px
     <p class="note">Suara asli video akan dilepas. Pilih Otomatis untuk menyamakan durasi, Manual untuk mengatur kecepatan sendiri, atau Kecepatan asli. Hasil unduhan tetap sepanjang video.</p>
     <button id="replaceBtn" class="btn" type="button" disabled>Ganti suara &amp; unduh</button>
     <div id="progress" class="progress" role="progressbar" aria-label="Progres unduhan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div id="progressFill" class="progress-fill"></div></div>
-    <div id="resultActions" class="result-actions" hidden><a href="app.html?generated=1">Lanjut ke Subtitle Video</a></div>
+    <div id="resultActions" class="result-actions" hidden><a href="app.html?generated=1&amp;standalone=1">Lanjut ke Subtitle Video</a></div>
     <div id="status" class="status" aria-live="polite">Pilih video dan file audio untuk mulai.</div>
   </section>
 </main>

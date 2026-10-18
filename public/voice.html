@@ -25,9 +25,9 @@ body{min-height:100dvh;touch-action:pan-y pinch-zoom;-webkit-overflow-scrolling:
 <header class="auth-bar"><div class="auth-bar__actions"><a href="history.html">Riwayat</a><div class="profile-wrap"><button class="profile-button" type="button" data-profile-trigger aria-label="Buka menu profil" aria-haspopup="menu" aria-expanded="false" aria-controls="profileMenu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5.5 20c.7-3.8 3-5.7 6.5-5.7s5.8 1.9 6.5 5.7"></path></svg></button><div id="profileMenu" class="profile-menu" data-profile-menu role="menu" hidden><p class="profile-email" data-account-email>Memuat email…</p><a href="terms.html" role="menuitem">Syarat Penggunaan / Terms of Use</a><a href="privacy.html" role="menuitem">Kebijakan Privasi</a><a href="delete-account.html" role="menuitem">Hapus akun &amp; data</a><button class="profile-menu__signout" type="button" data-sign-out role="menuitem">Keluar</button></div></div></div></header>
 <main class="app">
   <nav class="page-nav" aria-label="Pilih fitur">
-    <a href="app.html">Subtitle Video</a>
-    <a href="audio.html">Ganti Audio</a>
-    <a class="active" href="voice.html" aria-current="page">Suara AI</a>
+    <a href="app.html?standalone=1">Subtitle Video</a>
+    <a href="audio.html?standalone=1">Ganti Audio</a>
+    <a class="active" href="voice.html?standalone=1" aria-current="page">Suara AI</a>
     <a href="youtube.html">YouTube</a>
   </nav>
   <header class="hero">
@@ -60,7 +60,7 @@ body{min-height:100dvh;touch-action:pan-y pinch-zoom;-webkit-overflow-scrolling:
     <div id="result" class="result" hidden>
       <audio id="audioResult" controls></audio>
       <a id="downloadLink" class="download" download="suara-ai.wav">Unduh audio WAV</a>
-      <a id="audioHandoff" class="download" href="audio.html?generated=1">Lanjut ke Ganti Audio</a>
+      <a id="audioHandoff" class="download" href="audio.html?generated=1&amp;standalone=1">Lanjut ke Ganti Audio</a>
     </div>
     <div id="status" class="status" aria-live="polite">Masukkan teks untuk mulai.</div>
   </section>
