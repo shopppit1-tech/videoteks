@@ -91,7 +91,7 @@ function updateFitInfo() {
   const videoDuration = Number(videoPreview.duration);
   const audioDuration = Number(audioPreview.duration);
   if (speedMode.value === 'original') {
-    fitInfo.textContent = 'Kecepatan audio asli dipertahankan; audio pendek diulang dan audio panjang dipotong agar sepanjang video.';
+    fitInfo.textContent = 'Kecepatan asli; audio pendek diulang, audio panjang dipotong.';
     return;
   }
   if (!Number.isFinite(videoDuration) || !Number.isFinite(audioDuration) || videoDuration <= 0 || audioDuration <= 0) {
@@ -100,12 +100,11 @@ function updateFitInfo() {
   }
   const speed = speedMode.value === 'manual' ? Number(manualSpeedSlider.value) : audioDuration / videoDuration;
   const adjustedDuration = audioDuration / speed;
-  const action = speed > 1.02 ? 'dipercepat' : speed < 0.98 ? 'diperlambat' : 'hampir normal';
   if (speedMode.value === 'manual') {
-    const tail = adjustedDuration > videoDuration + 0.05 ? 'bagian akhir audio akan dipotong' : adjustedDuration < videoDuration - 0.05 ? 'sisa durasi video akan hening' : 'durasi audio hampir pas';
-    fitInfo.textContent = `Kecepatan ${speed.toFixed(2)}× (${action}); audio setelah diatur sekitar ${adjustedDuration.toFixed(1)} dtk. ${tail}.`;
+    const tail = adjustedDuration > videoDuration + 0.05 ? 'akhir audio dipotong' : adjustedDuration < videoDuration - 0.05 ? 'akhir video hening' : 'durasi pas';
+    fitInfo.textContent = `Manual ${speed.toFixed(2)}× · hasil ${adjustedDuration.toFixed(1)} dtk · ${tail}.`;
   } else {
-    fitInfo.textContent = `Kecepatan otomatis ${speed.toFixed(2)}× (${action}) agar audio pas dengan durasi video.`;
+    fitInfo.textContent = `Otomatis ${speed.toFixed(2)}× · hasil ${adjustedDuration.toFixed(1)} dtk.`;
   }
 }
 function showProgress(percent) {
