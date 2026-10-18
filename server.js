@@ -131,6 +131,36 @@ function parseSeoMetadata(value) {
   }
 }
 
+const YOUTUBE_SEO_EDITOR_BRIEF = [
+  'Berperan sebagai editor YouTube SEO untuk Shorts dan video biasa. Buat satu paket metadata yang menarik, akurat, dan mudah ditemukan.',
+  'JUDUL/HOOK: buat rasa penasaran lewat pertanyaan spesifik, kontras, detail menarik, atau manfaat konkret yang benar-benar dibayar oleh isi video. Letakkan frasa topik utama secara alami di awal. Hindari clickbait menyesatkan, janji yang tidak dipenuhi, klaim superlatif tanpa bukti, tren tak relevan, huruf kapital berlebihan, dan judul generik. Maksimal 100 karakter.',
+  'DESKRIPSI: tulis 2–4 paragraf informatif. Awali dengan hook dan kata kunci utama secara natural; jelaskan isi video, nilai/manfaat untuk penonton, lalu ajakan bertindak yang relevan. Tambahkan maksimal 3 hashtag topikal di akhir hanya jika berguna. Jangan mengarang timestamp, detail, klaim, nama, atau sumber; hindari pengulangan kata kunci. Maksimal 5000 karakter.',
+  'TAG: buat 15–25 tag yang spesifik dan saling melengkapi. Gabungkan topik utama, variasi frasa pencarian, kata kunci ekor panjang, sinonim/variasi ejaan yang wajar, subtopik, audiens, dan format video bila relevan. Urutkan dari paling penting. Tanpa tanda #, duplikasi, variasi kapital yang sama, tag viral tak terkait, atau keyword stuffing. Total gabungan seluruh tag maksimal 500 karakter.',
+  'Utamakan bukti dari konteks. Bila konteks hanya berupa cuplikan audio/frame atau subtitle parsial, jangan mengklaim hal yang tidak terlihat atau terdengar.'
+].join('\n');
+
+function normalizeSeoTags(rawTags) {
+  const tags = [];
+  const seen = new Set();
+  let totalLength = 0;
+  for (const rawTag of Array.isArray(rawTags) ? rawTags : []) {
+    const tag = String(rawTag ?? '')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/^#+\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const key = tag.toLowerCase();
+    if (!tag || tag.length > 80 || seen.has(key)) continue;
+    const nextLength = totalLength + tag.length + (tags.length ? 1 : 0);
+    if (nextLength > 500) continue;
+    tags.push(tag);
+    seen.add(key);
+    totalLength = nextLength;
+    if (tags.length === 30) break;
+  }
+  return tags;
+}
+
 function encryptYoutubeRefreshToken(token, encryptionKey) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey, iv);
@@ -784,34 +814,26 @@ app.post('/api/youtube/seo-video-metadata', requireFirebaseUser, upload.single('
       return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
     });
     const prompt = [
-      'Buat metadata SEO YouTube berdasarkan isi video yang benar-benar diberikan: audio hasil ekstraksi dan frame gambar sampel. Frame dikirim setelah teks ini dalam urutan waktu yang tercantum.',
-      'Jadikan audio dan adegan visual sebagai bukti utama. Nama file dan kata kunci pengguna hanya petunjuk sekunder, bukan bukti fakta. Jangan mengarang nama orang, tempat, produk, angka, klaim, atau kejadian. Jika bukti terbatas, gunakan metadata umum yang aman dan tetap relevan.',
+      YOUTUBE_SEO_EDITOR_BRIEF,
+      'Gunakan isi video yang benar-benar diberikan: audio hasil ekstraksi dan frame gambar sampel. Jadikan audio dan adegan visual sebagai bukti utama. Nama file dan kata kunci pengguna hanya petunjuk sekunder, bukan bukti fakta.',
       `Panduan audio: ${audioContext}`,
       framePaths.length ? `Frame sampel berurutan pada perkiraan waktu: ${sampledTimes.join(', ')}.` : 'Tidak ada frame visual yang berhasil diekstrak.',
       filename ? `Nama file (petunjuk lemah saja): ${filename}` : '',
       topic ? `Kata kunci tambahan dari pengguna: ${topic}` : '',
       language ? `Tulis metadata dalam bahasa ${language}.` : 'Gunakan bahasa yang paling dominan di audio; bila tidak ada ucapan, gunakan bahasa Indonesia.',
-      'Kembalikan hanya JSON valid dengan bentuk {"title":"...","description":"...","tags":["..."]}. Judul maksimal 100 karakter. Deskripsi ringkas, natural, dan faktual. Buat 3 sampai 15 tag relevan tanpa tanda # dan tanpa duplikasi.'
+      'Kembalikan hanya JSON valid dengan bentuk {"title":"...","description":"...","tags":["..."]}. Pastikan title berupa hook yang kuat, description lengkap, dan tags berisi 15–25 tag selama tetap memenuhi batas 500 karakter.'
     ].filter(Boolean).join('\n\n');
     const parts = [{ text: prompt }];
     if (audioPart) parts.push(audioPart);
     for (const framePath of framePaths) parts.push({ inlineData: { mimeType: 'image/jpeg', data: await fs.readFile(framePath, 'base64') } });
     const result = await geminiRequest(config.model, {
       contents: [{ parts }],
-      generationConfig: { temperature: 0.2, responseMimeType: 'application/json', maxOutputTokens: 1200 }
+      generationConfig: { temperature: 0.4, responseMimeType: 'application/json', maxOutputTokens: 1800 }
     }, config.apiKey, 120000);
     const metadata = parseSeoMetadata(responseText(result));
     const title = String(metadata?.title || '').trim().slice(0, 100);
     const description = String(metadata?.description || '').trim().slice(0, 5000);
-    const tags = Array.isArray(metadata?.tags) ? [...new Set(metadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean))].slice(0, 30) : [];
-    const tagsWithinLimit = [];
-    let tagsLength = 0;
-    for (const tag of tags) {
-      const nextLength = tagsLength + tag.length + (tagsWithinLimit.length ? 1 : 0);
-      if (nextLength > 500) break;
-      tagsWithinLimit.push(tag);
-      tagsLength = nextLength;
-    }
+    const tagsWithinLimit = normalizeSeoTags(metadata?.tags);
     if (!title || !description) return res.status(502).json({ error: 'Gemini belum menghasilkan metadata yang valid dari isi video. Coba lagi.' });
     res.set('Cache-Control', 'no-store');
     return res.json({ title, description, tags: tagsWithinLimit });
@@ -832,35 +854,22 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
   const topic = String(req.body?.topic || '').trim().slice(0, 240);
   if (!captions && !topic) return res.status(400).json({ error: 'Masukkan topik atau teruskan subtitle agar AI SEO memiliki konteks.' });
   const prompt = [
-    'Buat metadata YouTube yang menarik dan ramah pencarian berdasarkan konteks yang diberikan.',
-    'Jangan mengarang fakta yang tidak ada dalam konteks. Hindari clickbait menyesatkan.',
-    'Kembalikan hanya JSON valid dengan tiga properti: {"title":"...","description":"...","tags":["..."]}.',
-    'Judul maksimal 100 karakter. Deskripsi maksimal 5000 karakter, tulis ringkas, relevan, natural, dan boleh menyertakan tagar seperlunya.',
-    'Buat 3 sampai 15 tag YouTube yang relevan, singkat, tanpa tanda #, dan jangan mengulang tag yang sama.',
+    YOUTUBE_SEO_EDITOR_BRIEF,
     language ? `Bahasa target subtitle/video: ${language}. Tulis metadata dalam bahasa tersebut.` : 'Gunakan bahasa yang paling sesuai dengan konteks.',
     topic ? `Topik/kata kunci tambahan dari pengguna: ${topic}` : '',
-    captions ? `Subtitle/konteks video:\n${captions}` : ''
+    captions ? `Subtitle/konteks video (sumber utama untuk fakta):\n${captions}` : '',
+    'Kembalikan hanya JSON valid dengan tiga properti: {"title":"...","description":"...","tags":["..."]}. Pastikan title berupa hook yang kuat, description lengkap, dan tags berisi 15–25 tag selama tetap memenuhi batas 500 karakter.'
   ].filter(Boolean).join('\n\n');
   try {
     const result = await geminiRequest(config.model, {
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.5, responseMimeType: 'application/json' }
+      generationConfig: { temperature: 0.55, responseMimeType: 'application/json', maxOutputTokens: 1800 }
     }, config.apiKey);
     const text = result?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
     const metadata = parseSeoMetadata(text);
     const title = String(metadata?.title || '').trim().slice(0, 100);
     const description = String(metadata?.description || '').trim().slice(0, 5000);
-    const tags = Array.isArray(metadata?.tags)
-      ? [...new Set(metadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean))].slice(0, 30)
-      : [];
-    const tagsWithinLimit = [];
-    let tagsLength = 0;
-    for (const tag of tags) {
-      const nextLength = tagsLength + tag.length + (tagsWithinLimit.length ? 1 : 0);
-      if (nextLength > 500) break;
-      tagsWithinLimit.push(tag);
-      tagsLength = nextLength;
-    }
+    const tagsWithinLimit = normalizeSeoTags(metadata?.tags);
     if (!title || !description) return res.status(502).json({ error: 'Gemini tidak mengembalikan judul dan deskripsi. Coba lagi.' });
     res.set('Cache-Control', 'no-store');
     res.json({ title, description, tags: tagsWithinLimit });
