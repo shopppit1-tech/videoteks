@@ -98,7 +98,9 @@ function navigate(route, params = new URLSearchParams(), { writeHistory = false,
   frame.hidden = true;
   frame.loading = 'eager';
   frame.allow = 'autoplay; clipboard-write';
-  frame.setAttribute('scrolling', 'yes');
+  const shellScrollRoute = route === 'audio' || route === 'voice';
+  frame.setAttribute('scrolling', shellScrollRoute ? 'no' : 'yes');
+  if (shellScrollRoute) frame.dataset.scrollMode = 'shell';
   frame.referrerPolicy = 'strict-origin-when-cross-origin';
   frame.addEventListener('load', () => {
     frame.dataset.ready = 'true';
@@ -150,8 +152,13 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (event.data.type === 'frame-size') {
-    // Keep every feature iframe at the viewport height so its document can scroll internally.
-    sourceFrame.style.height = '100%';
+    const route = [...frames.entries()].find(([, frame]) => frame === sourceFrame)?.[0];
+    if (route !== 'audio' && route !== 'voice') return;
+    const height = Number(event.data.height);
+    if (!Number.isFinite(height) || height <= 0) return;
+    const nextHeight = Math.max(Math.ceil(window.innerHeight), Math.ceil(height));
+    const currentHeight = Math.ceil(sourceFrame.getBoundingClientRect().height);
+    if (Math.abs(nextHeight - currentHeight) > 1) sourceFrame.style.height = `${nextHeight}px`;
     return;
   }
   if (event.data.type === 'auth-required') {
