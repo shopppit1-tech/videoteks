@@ -69,7 +69,8 @@ function updateControls() {
   descriptionInput.disabled = uploading;
   $('#privacyStatus').disabled = uploading;
   rightsCheck.disabled = uploading;
-  seoButton.disabled = uploading || seoBusy || !seoAiConfigured;
+  // Tombol tetap aktif; jika AI belum siap, tampilkan error dari server saat ditekan.
+  seoButton.disabled = uploading || seoBusy;
 }
 
 function displayBytes(bytes) {
@@ -369,7 +370,7 @@ descriptionInput.addEventListener('input', () => {
 });
 
 async function generateSeoMetadata() {
-  if (!seoAiConfigured || seoBusy || uploading) return;
+  if (seoBusy || uploading) return;
   seoBusy = true;
   seoButton.textContent = 'Membuat metadata…';
   setStatus('AI SEO sedang menyiapkan judul, deskripsi, dan tag…');
