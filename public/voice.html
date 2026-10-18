@@ -43,12 +43,9 @@ body{min-height:100dvh;touch-action:pan-y pinch-zoom;-webkit-overflow-scrolling:
       <input id="narrationVideo" class="select" type="file" accept="video/*">
       <small id="videoInfo">Belum ada video dipilih.</small>
     </div>
-    <label class="hint" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px">
-      <input id="videoConsent" type="checkbox">
-      <span>Saya setuju video dikirim untuk analisis AI. Audio dan maksimal 12 cuplikan gambar diproses sementara lalu dihapus.</span>
-    </label>
+    <p class="hint">Video dianalisis AI saat tombol ditekan; file sementara dihapus setelah proses.</p>
     <button id="videoNarrationBtn" class="btn" type="button" disabled>Buat narasi + suara otomatis</button>
-    <div id="videoStatus" class="status" aria-live="polite">Pilih video dan setujui analisis untuk mulai.</div>
+    <div id="videoStatus" class="status" aria-live="polite">Pilih video lalu tekan tombol.</div>
   </section>
   <section class="card">
     <div class="field">
