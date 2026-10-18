@@ -1,4 +1,4 @@
-const CACHE = 'videoteks-shell-v50';
+const CACHE = 'videoteks-shell-v51';
 const BASE_URL = new URL('./', self.location.href);
 const HOME_URL = new URL('index.html', BASE_URL).href;
 const SHELL_FILES = [
@@ -25,7 +25,7 @@ const SHELL_FILES = [
   'voice.js',
   'youtube.html',
   'youtube.js',
-  'youtube.js?v=seo-video-content-1',
+  'youtube.js?v=seo-video-content-2',
   'youtube-handoff.js',
   'history.html',
   'history.js',
@@ -58,6 +58,19 @@ self.addEventListener('fetch', (event) => {
       })()
     : event.request;
 
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).then(async (response) => {
+        if (response.ok && response.type === 'basic') {
+          const cache = await caches.open(CACHE);
+          await cache.put(cacheKey, response.clone());
+        }
+        return response;
+      }).catch(() => caches.match(cacheKey).then((cached) => cached || caches.match(HOME_URL)))
+    );
+    return;
+  }
+
   const update = fetch(event.request).then(async (response) => {
     if (response.ok && response.type === 'basic') {
       const cache = await caches.open(CACHE);
@@ -66,7 +79,6 @@ self.addEventListener('fetch', (event) => {
     return response;
   });
 
-  // Return the cached page/assets immediately and refresh the cache in the background.
   event.waitUntil(update.then(() => undefined).catch(() => undefined));
   event.respondWith(
     caches.match(cacheKey).then((cached) => cached || update.catch(() => caches.match(HOME_URL)))
