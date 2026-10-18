@@ -1003,7 +1003,6 @@ app.post('/api/voice/video-narration', requireFirebaseUser, upload.single('video
   try {
     if (!requireKey(res) || !requireTtsKey(res)) return;
     if (!req.file) return res.status(400).json({ error: 'Pilih video terlebih dahulu.' });
-    if (String(req.body?.consent || '') !== 'true') return res.status(400).json({ error: 'Setujui analisis video sebelum membuat narasi.' });
     if (req.file.mimetype && !req.file.mimetype.startsWith('video/') && req.file.mimetype !== 'application/octet-stream') {
       return res.status(415).json({ error: 'File yang dipilih bukan video.' });
     }

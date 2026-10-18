@@ -38,7 +38,6 @@ const downloadLink = $('#downloadLink');
 const audioHandoff = $('#audioHandoff');
 const status = $('#status');
 const videoInput = $('#narrationVideo');
-const videoConsent = $('#videoConsent');
 const videoInfo = $('#videoInfo');
 const videoNarrationBtn = $('#videoNarrationBtn');
 const videoStatus = $('#videoStatus');
@@ -76,7 +75,7 @@ function formatBytes(bytes) {
 
 function updateVideoControls() {
   const file = videoInput.files?.[0];
-  videoNarrationBtn.disabled = busy || videoBusy || !file || !videoConsent.checked || file.size > MAX_VIDEO_BYTES;
+  videoNarrationBtn.disabled = busy || videoBusy || !file || file.size > MAX_VIDEO_BYTES;
   generateBtn.disabled = busy || videoBusy || !textInput.value.trim();
 }
 
@@ -152,7 +151,7 @@ videoInput.addEventListener('change', () => {
   const file = videoInput.files?.[0];
   if (!file) {
     videoInfo.textContent = 'Belum ada video dipilih.';
-    setVideoStatus('Pilih video dan setujui analisis untuk mulai.');
+    setVideoStatus('Pilih video lalu tekan tombol.');
     updateVideoControls();
     return;
   }
@@ -161,7 +160,7 @@ videoInput.addEventListener('change', () => {
     videoInfo.textContent = `${file.name} · ${formatBytes(file.size)}`;
     setVideoStatus('Ukuran video maksimal 500 MB.', true);
   } else {
-    setVideoStatus('Video dipilih. Centang persetujuan untuk mulai.');
+    setVideoStatus('Video dipilih. Siap dibuat.');
     metadataUrl = URL.createObjectURL(file);
     const probe = document.createElement('video');
     probe.preload = 'metadata';
@@ -180,11 +179,10 @@ videoInput.addEventListener('change', () => {
   }
   updateVideoControls();
 });
-videoConsent.addEventListener('change', updateVideoControls);
 
 videoNarrationBtn.addEventListener('click', async () => {
   const file = videoInput.files?.[0];
-  if (!file || !videoConsent.checked || videoBusy || busy) return;
+  if (!file || videoBusy || busy) return;
   if (file.size > MAX_VIDEO_BYTES) {
     setVideoStatus('Ukuran video maksimal 500 MB.', true);
     return;
@@ -196,7 +194,6 @@ videoNarrationBtn.addEventListener('click', async () => {
   try {
     const formData = new FormData();
     formData.append('video', file);
-    formData.append('consent', 'true');
     const response = await authenticatedFetch('/api/voice/video-narration', { method: 'POST', body: formData });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'Narasi dari video gagal dibuat.');
