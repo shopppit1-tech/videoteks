@@ -13,9 +13,9 @@
   <title>VideoTeks Studio</title>
   <style>
     *{box-sizing:border-box}
-    html,body{width:100%;height:100%;min-height:100%;margin:0;overflow:hidden;background:#0c141d;color:#f7f8fb;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+    html,body{width:100%;height:100%;min-height:100%;margin:0;overflow:hidden;background:#0c141d;color:#f7f8fb;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;touch-action:pan-y}
     #screenHost{position:fixed;inset:0;overflow:hidden;background:radial-gradient(ellipse at 50% 0,#253452 0%,#111a24 46%,#0c141d 82%)}
-    #screenHost iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#0c141d}
+    #screenHost iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#0c141d;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y}
     #screenHost iframe[hidden]{display:none!important}
     #shellBoot{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:12px;background:radial-gradient(ellipse at 50% 38%,#263650 0%,#172434 42%,#0c141d 86%);text-align:center}
     #shellBoot[hidden]{display:none}
