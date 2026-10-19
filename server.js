@@ -395,7 +395,7 @@ async function processOneAutoUpload(jobSnapshot) {
     const config = youtubeOAuthConfig();
     const seoConfig = youtubeSeoAIConfig();
     if (!config) throw new Error('Integrasi Google OAuth belum dikonfigurasi di server.');
-    if (!seoConfig) throw new Error('Gemini SEO YouTube belum dikonfigurasi di server.');
+    if (!seoConfig && !geminiKeysInRotation().length) throw new Error('Gemini utama belum dikonfigurasi di server.');
     if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2 && !process.env.GEMINI_API_KEY_3) throw new Error('GEMINI_API_KEY untuk membuat narasi dan subtitle belum dikonfigurasi di server.');
     if (!process.env.GEMINI_TTS_API_KEY) throw new Error('GEMINI_TTS_API_KEY untuk membuat suara AI belum dikonfigurasi di server.');
     const folderId = googleDriveFolderId(claim.settings.folderId);
@@ -413,7 +413,15 @@ async function processOneAutoUpload(jobSnapshot) {
     videoPath = await downloadGoogleDriveVideo(driveAccessToken, file);
     pipelineResult = await autoUploadMediaPipeline(videoPath, (stage) => setAutoUploadStage(jobRef, leaseId, stage));
     await setAutoUploadStage(jobRef, leaseId, 'metadata');
-    const metadata = await generateYoutubeSeoFromFile(pipelineResult.finalVideoPath, file.name, '', 'Indonesian', seoConfig);
+    let metadata;
+    try {
+      if (!seoConfig) throw new Error('Gemini SEO khusus tidak tersedia; gunakan Gemini utama.');
+      metadata = await generateYoutubeSeoFromFile(pipelineResult.finalVideoPath, file.name, '', 'Indonesian', seoConfig);
+    } catch (seoError) {
+      console.warn('[youtube-auto-upload] SEO khusus gagal, memakai Gemini utama dari narasi/subtitle:', seoError.message || seoError.name);
+      metadata = await generateYoutubeMetadataFromCaptions(pipelineResult.narration, 'Indonesian');
+      if (!metadata) throw new Error('Gemini utama gagal membuat judul dan deskripsi dari subtitle.');
+    }
     await setAutoUploadStage(jobRef, leaseId, 'uploading');
     const uploaded = await uploadVideoToYoutube(youtubeAccessToken, pipelineResult.finalVideoPath, { ...file, mimeType: 'video/mp4' }, {
       snippet: { title: metadata.title, description: metadata.description, ...(metadata.tags.length ? { tags: metadata.tags } : {}) },
@@ -685,7 +693,34 @@ function subtitleStyle(settings) {
 }
 async function cleanup(...files) { await Promise.all(files.filter(Boolean).map(f => fs.rm(f, { force: true }).catch(() => {}))); }
 function responseText(data) { return data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || ''; }
-
+async function generateYoutubeMetadataFromCaptions(captions, language = '') {
+  const cleanCaptions = String(captions || '').trim().slice(0, 12000);
+  if (!cleanCaptions) return null;
+  const prompt = [
+    'Buat metadata YouTube berdasarkan subtitle berikut. Gunakan hanya fakta yang benar-benar ada di subtitle; jangan mengarang nama, tempat, angka, atau kejadian.',
+    'Buat judul menarik maksimal 100 karakter, deskripsi informatif 2–4 kalimat maksimal 5000 karakter, dan 5–15 tag relevan tanpa tanda # dengan total maksimal 500 karakter.',
+    language ? `Tulis metadata dalam bahasa ${String(language).slice(0, 80)}.` : 'Gunakan bahasa yang sama dengan subtitle.',
+    `Subtitle video:\n${cleanCaptions}`,
+    'Kembalikan JSON valid saja dalam bentuk {"title":"...","description":"...","tags":["..."]}.'
+  ].join('\n\n');
+  const keys = geminiKeysInRotation();
+  if (!keys.length) return null;
+  for (const apiKey of keys) {
+    try {
+      const result = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35, responseMimeType: 'application/json', maxOutputTokens: 900 } }, apiKey, 60000, 1);
+      rotateGeminiKeyAfter(apiKey);
+      const metadata = parseSeoMetadata(responseText(result));
+      const title = String(metadata?.title || '').trim().slice(0, 100);
+      const description = String(metadata?.description || '').trim().slice(0, 5000);
+      if (!title || !description) throw new Error('Metadata Gemini tidak lengkap.');
+      return { title, description, tags: normalizeSeoTags(metadata?.tags) };
+    } catch (error) {
+      if (!isGeminiRetryableError(error.status, error.message)) throw error;
+      coolDownGeminiKeyAfterFailure(apiKey, error);
+    }
+  }
+  return null;
+}
 autoUploadMediaPipeline = createAutoUploadMediaPipeline({
   exec,
   geminiRequest,
@@ -754,6 +789,12 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
           const segments = (parsed?.segments || []).map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || (Number(s.start) + 2), text: String(s.text || '').trim() })).filter(s => s.text);
           rotateGeminiKeyAfter(apiKey);
           const text = segments.map(s => s.text).join('\n');
+          let metadata = null;
+          try {
+            metadata = await generateYoutubeMetadataFromCaptions(text);
+          } catch (metadataError) {
+            console.warn('[youtube-metadata] subtitle berhasil, tetapi judul/deskripsi gagal dibuat:', metadataError.message || metadataError.name);
+          }
           let historyId = null;
           let historyErrorMessage = null;
           try {
@@ -772,7 +813,7 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
             historyErrorMessage = historyFailureMessage(historyError, 'disimpan');
             console.warn('[history] transkripsi berhasil, tetapi riwayat gagal disimpan:', historyError.message);
           }
-          res.json({ text, segments, historyId, historySaved: Boolean(historyId), historyError: historyErrorMessage });
+          res.json({ text, segments, metadata, historyId, historySaved: Boolean(historyId), historyError: historyErrorMessage });
           return;
         } catch (error) {
           if (!isGeminiRetryableError(error.status, error.message)) {
@@ -1197,11 +1238,19 @@ async function generateYoutubeSeoFromFile(filePath, filename, topic, language, c
 
 app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
   const config = youtubeSeoAIConfig();
-  if (!config) return res.status(503).json({ error: 'Gemini SEO YouTube belum dikonfigurasi. Isi GEMINI_YOUTUBE_API_KEY khusus YouTube di server.' });
   const captions = String(req.body?.captions || '').trim().slice(0, 12000);
   const language = String(req.body?.language || '').trim().slice(0, 80);
   const topic = String(req.body?.topic || '').trim().slice(0, 240);
   if (!captions && !topic) return res.status(400).json({ error: 'Masukkan topik atau teruskan subtitle agar AI SEO memiliki konteks.' });
+  if (!config && captions) {
+    try {
+      const metadata = await generateYoutubeMetadataFromCaptions(captions, language);
+      if (metadata) return res.json(metadata);
+    } catch (error) {
+      console.warn('[youtube-metadata] fallback Gemini utama gagal:', error.message || error.name);
+    }
+  }
+  if (!config) return res.status(503).json({ error: 'Gemini utama belum siap untuk membuat metadata dari subtitle.' });
   const prompt = [
     YOUTUBE_SEO_EDITOR_BRIEF,
     language ? `Bahasa target subtitle/video: ${language}. Tulis metadata dalam bahasa tersebut.` : 'Gunakan bahasa yang paling sesuai dengan konteks.',
@@ -1226,6 +1275,14 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
     res.json({ title, description, tags: tagsWithinLimit });
   } catch (error) {
     console.warn(`[youtube-seo] Gemini request failed after ${Date.now() - seoStartedAt}ms:`, error.message || error.name || 'Error');
+    if (captions) {
+      try {
+        const fallback = await generateYoutubeMetadataFromCaptions(captions, language);
+        if (fallback) return res.json(fallback);
+      } catch (fallbackError) {
+        console.warn('[youtube-metadata] fallback Gemini utama gagal:', fallbackError.message || fallbackError.name);
+      }
+    }
     res.status(502).json({ error: 'Gemini tidak dapat membuat judul dan deskripsi. Periksa API key, model, kuota, lalu coba lagi.' });
   }
 });
@@ -1465,7 +1522,7 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
     let folderName = folderId ? (existing.folderName || '') : '';
     if (enabled) {
       if (!config) return res.status(503).json({ error: 'Integrasi Google belum dikonfigurasi di server.' });
-      if (!youtubeSeoAIConfig()) return res.status(503).json({ error: 'Gemini SEO YouTube belum siap. Periksa key dan kuota sebelum mengaktifkan upload otomatis.' });
+      // Metadata dapat dibuat dari subtitle/narasi memakai Gemini utama; key SEO khusus bersifat opsional.
       if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2 && !process.env.GEMINI_API_KEY_3) return res.status(503).json({ error: 'Gemini untuk membuat narasi dan subtitle belum dikonfigurasi di server.' });
       if (!process.env.GEMINI_TTS_API_KEY) return res.status(503).json({ error: 'Gemini Suara AI belum dikonfigurasi di server.' });
       const [driveSnapshot, youtubeSnapshot] = await Promise.all([googleDriveIntegrationRef(uid).get(), youtubeIntegrationRef(uid).get()]);

@@ -490,9 +490,16 @@ async function loadHandoffVideo() {
     fileInput.dispatchEvent(new Event('change'));
     sourceCaptions = String(record.captions || '');
     sourceLanguage = String(record.language || '');
-    $('#handoffHint').textContent = sourceLanguage
-      ? `Video hasil subtitle/terjemahan (${sourceLanguage}) dimasukkan otomatis.`
-      : 'Video hasil subtitle dimasukkan otomatis.';
+    if (record.title) titleInput.value = String(record.title).slice(0, 100);
+    if (record.description) descriptionInput.value = String(record.description).slice(0, 5000);
+    if (Array.isArray(record.tags) && record.tags.length) seoTopic.value = record.tags.join(', ');
+    titleInput.dispatchEvent(new Event('input'));
+    descriptionInput.dispatchEvent(new Event('input'));
+    $('#handoffHint').textContent = record.title && record.description
+      ? 'Video subtitle dan metadata YouTube dari Gemini utama dimasukkan otomatis.'
+      : sourceLanguage
+        ? `Video hasil subtitle/terjemahan (${sourceLanguage}) dimasukkan otomatis.`
+        : 'Video hasil subtitle dimasukkan otomatis.';
     $('#handoffHint').hidden = false;
   } catch (error) {
     $('#handoffHint').textContent = error.message || 'Hasil video tidak dapat dimuat.';
@@ -620,7 +627,7 @@ async function generateSeoMetadata() {
     setStatus(error.message || 'AI SEO gagal membuat metadata.', true);
   } finally {
     seoBusy = false;
-    seoButton.textContent = 'Buat judul & deskripsi SEO (Gemini)';
+    seoButton.textContent = 'Buat judul & deskripsi dari subtitle (Gemini utama)';
     updateControls();
   }
 }

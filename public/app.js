@@ -43,6 +43,7 @@ const caption = $('#caption');
 let transcribeController = null;
 let currentHistoryId = null;
 let historySaveTimer = null;
+let generatedMetadata = null;
 
 function scheduleHistorySave() {
   if (!currentHistoryId) return;
@@ -175,12 +176,26 @@ async function transcribeCurrentFile() {
     if (!response.ok) throw Error(data.error);
     if (state.file !== selectedFile || transcribeController !== controller) return;
     currentHistoryId = data.historyId || null;
+    generatedMetadata = data.metadata || null;
     state.segments = data.segments || [];
     caption.value = state.segments[0]?.text || '';
     syncCaption(); drawSegments();
     setStatus(data.historySaved
       ? `${state.segments.length} segmen siap diedit. Riwayat tersimpan.`
       : `${state.segments.length} segmen siap diedit. ${data.historyError || 'Riwayat belum tersimpan.'}`, !data.historySaved);
+    try {
+      await saveYoutubeHandoff(selectedFile, {
+        name: selectedFile.name || 'video-subtitle.mp4',
+        captions: state.segments.map((segment) => segment.text).join('\n'),
+        title: generatedMetadata?.title,
+        description: generatedMetadata?.description,
+        tags: generatedMetadata?.tags
+      });
+      $('#youtubeHandoffLink').hidden = false;
+    } catch (handoffError) {
+      $('#youtubeHandoffLink').hidden = true;
+      setStatus(`Subtitle siap, tetapi belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
+    }
   } catch (error) {
     if (error.name !== 'AbortError' && state.file === selectedFile) setStatus(error.message, true);
   } finally {
@@ -223,7 +238,10 @@ $('#translateBtn').onclick = async () => {
       await saveYoutubeHandoff(state.file, {
         name: state.file.name || 'video-terjemahan.mp4',
         captions: state.segments.map((segment) => segment.text).join('\n'),
-        language: target
+        language: target,
+        title: generatedMetadata?.title,
+        description: generatedMetadata?.description,
+        tags: generatedMetadata?.tags
       });
       $('#youtubeHandoffLink').hidden = false;
       setStatus(data.historySaved
@@ -307,7 +325,10 @@ $('#exportBtn').onclick = async () => {
       await saveYoutubeHandoff(blob, {
         name: 'videoteks-subtitle.mp4',
         captions: state.segments.map((segment) => segment.text).join('\n'),
-        language: state.translationTarget
+        language: state.translationTarget,
+        title: generatedMetadata?.title,
+        description: generatedMetadata?.description,
+        tags: generatedMetadata?.tags
       });
       $('#youtubeHandoffLink').hidden = false;
     } catch (handoffError) {
