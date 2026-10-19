@@ -26,6 +26,8 @@ const SHELL_FILES = [
   'youtube.html',
   'youtube.js',
   'youtube.js?v=seo-video-content-4',
+  'drive-auto-upload.html',
+  'drive-auto-upload.js?v=1',
   'youtube-handoff.js',
   'history.html',
   'history.js',

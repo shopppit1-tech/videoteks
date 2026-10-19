@@ -6,6 +6,7 @@ const ROUTES = {
   audio: { file: 'audio.html', title: 'Ganti Audio' },
   voice: { file: 'voice.html', title: 'Suara AI' },
   youtube: { file: 'youtube.html', title: 'Upload YouTube' },
+  driveAutoUpload: { file: 'drive-auto-upload.html', title: 'Google Drive ke YouTube' },
   history: { file: 'history.html', title: 'Riwayat' },
   privacy: { file: 'privacy.html', title: 'Kebijakan Privasi' },
   terms: { file: 'terms.html', title: 'Syarat Penggunaan' },

@@ -3,6 +3,7 @@ const FEATURE_ROUTES = {
   'audio.html': 'audio',
   'voice.html': 'voice',
   'youtube.html': 'youtube',
+  'drive-auto-upload.html': 'driveAutoUpload',
   'history.html': 'history'
 };
 const SHELL_ROUTES = {
