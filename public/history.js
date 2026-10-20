@@ -14,7 +14,8 @@ function kindLabel(type) {
     'video-transcription': 'Transkripsi video',
     'video-translation': 'Terjemahan video',
     'audio-replace': 'Ganti audio',
-    'ai-voice': 'Suara AI'
+    'ai-voice': 'Suara AI',
+    'youtube-auto-upload': 'Drive → YouTube otomatis'
   })[type] || 'Riwayat aktivitas';
 }
 
@@ -96,6 +97,20 @@ function makeHistoryCard(item) {
     addMeta(content, 'Target', item.translationTarget);
     addTextDetails(content, 'Lihat teks asal', item.sourceText);
     addTextDetails(content, 'Lihat hasil terjemahan', item.translatedText || item.text);
+  } else if (type === 'youtube-auto-upload') {
+    addMeta(content, 'Video', item.fileName);
+    addMeta(content, 'Status', ({ uploaded: 'Berhasil diunggah', error: 'Gagal', empty: 'Antrean kosong' })[item.uploadStatus] || item.uploadStatus);
+    addMeta(content, 'Error', item.error);
+    if (item.youtubeUrl) {
+      const link = document.createElement('a');
+      link.className = 'history-card__link';
+      link.href = item.youtubeUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Buka video di YouTube';
+      content.append(link);
+    }
+    addTextDetails(content, 'Lihat deskripsi YouTube', item.description);
   } else {
     addMeta(content, 'Video', item.fileName);
     const transcript = item.text || (Array.isArray(item.segments) ? item.segments.map((segment) => segment.text || '').join('\n') : '');

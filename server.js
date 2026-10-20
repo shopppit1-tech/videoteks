@@ -116,6 +116,28 @@ function youtubeAutoUploadJobRef(uid) {
   return firebaseDb.collection('youtubeAutoUploadJobs').doc(uid);
 }
 
+async function saveAutoUploadHistory(uid, details) {
+  try {
+    const status = String(details.status || 'error');
+    const title = String(details.title || (status === 'uploaded' ? 'Upload Drive ke YouTube berhasil' : 'Upload Drive ke YouTube gagal')).slice(0, 180);
+    await historyCollection(uid).add({
+      type: 'youtube-auto-upload',
+      title,
+      fileName: String(details.fileName || '').slice(0, 180),
+      uploadStatus: status,
+      driveFileId: String(details.driveFileId || '').slice(0, 180),
+      youtubeVideoId: String(details.youtubeVideoId || '').slice(0, 180),
+      youtubeUrl: details.youtubeVideoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(String(details.youtubeVideoId))}` : '',
+      description: String(details.description || '').slice(0, 5000),
+      error: String(details.error || '').slice(0, 500),
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.warn('[history] upload otomatis selesai, tetapi riwayat gagal disimpan:', error.message || error.name);
+  }
+}
+
 function youtubeOAuthConfig() {
   const clientId = process.env.YOUTUBE_CLIENT_ID;
   const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
@@ -391,6 +413,7 @@ async function processOneAutoUpload(jobSnapshot) {
   if (claim.status !== 'claimed') return { status: claim.status };
   let videoPath = null;
   let pipelineResult = null;
+  let file = null;
   try {
     const config = youtubeOAuthConfig();
     if (!config) throw new Error('Integrasi Google OAuth belum dikonfigurasi di server.');
@@ -403,7 +426,7 @@ async function processOneAutoUpload(jobSnapshot) {
       refreshAccessTokenForIntegration(googleDriveIntegrationRef(uid), config, 'Google Drive'),
       refreshAccessTokenForIntegration(youtubeIntegrationRef(uid), config, 'YouTube')
     ]);
-    const file = await findNextDriveVideo(driveAccessToken, folderId, jobRef);
+    file = await findNextDriveVideo(driveAccessToken, folderId, jobRef);
     if (!file) {
       await jobRef.set({ processing: false, processingUntil: 0, processingStage: '', status: 'empty', lastCheckedAt: Date.now(), lastError: '', updatedAt: Date.now() }, { merge: true });
       return { status: 'empty' };
@@ -427,12 +450,15 @@ async function processOneAutoUpload(jobSnapshot) {
       transaction.set(processedRef, { driveFileId: file.id, fileName: String(file.name || '').slice(0, 180), youtubeVideoId: uploaded.id, title: metadata.title, uploadedAt: completedAt, uploadDate: today });
       transaction.set(jobRef, { processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'uploaded', lastUploadDate: today, lastUploadedAt: completedAt, lastFileName: String(file.name || '').slice(0, 180), lastTitle: metadata.title, lastVideoId: uploaded.id, lastError: '', updatedAt: completedAt }, { merge: true });
     });
+    await saveAutoUploadHistory(uid, { status: 'uploaded', fileName: file.name, driveFileId: file.id, youtubeVideoId: uploaded.id, title: metadata.title, description: metadata.description });
     return { status: 'uploaded' };
   } catch (error) {
     console.error('[youtube-auto-upload] job failed:', error.message || error.name || 'Error');
-    await jobRef.get().then((snapshot) => {
-      if (snapshot.data()?.leaseId === leaseId) return jobRef.set({ processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'error', lastError: String(error.message || 'Unggah otomatis gagal.').slice(0, 500), lastAttemptAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+    const errorMessage = String(error.message || 'Unggah otomatis gagal.').slice(0, 500);
+    await jobRef.get().then(async (snapshot) => {
+      if (snapshot.data()?.leaseId === leaseId) return jobRef.set({ processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'error', lastError: errorMessage, lastAttemptAt: Date.now(), updatedAt: Date.now() }, { merge: true });
     }).catch(() => {});
+    await saveAutoUploadHistory(uid, { status: 'error', fileName: file?.name, driveFileId: file?.id, error: errorMessage });
     return { status: 'error' };
   } finally {
     if (videoPath) await fs.rm(videoPath, { force: true }).catch(() => {});
