@@ -10,6 +10,7 @@ const saveButton = $('#save');
 const folderInput = $('#folder');
 const enabledInput = $('#enabled');
 const statusNode = $('#status');
+const uploadNotification = $('#uploadNotification');
 const resultLink = $('#result');
 let youtubeClient = null;
 let driveClient = null;
@@ -18,6 +19,20 @@ let youtubeEmailNotifications = false;
 let driveConnected = false;
 let saving = false;
 let authTimer = null;
+let initialUploadStatusLoaded = false;
+
+function notifySuccessfulUpload(data) {
+  const uploadedAt = Number(data.lastUploadedAt || 0);
+  if (!uploadedAt || !data.lastVideoId) return;
+  const seenKey = 'videoteks-last-auto-upload-seen';
+  const previous = Number(localStorage.getItem(seenKey) || 0);
+  localStorage.setItem(seenKey, String(uploadedAt));
+  if (!initialUploadStatusLoaded || uploadedAt <= previous) return;
+  const title = data.lastTitle || data.lastFileName || 'Video';
+  uploadNotification.textContent = `Notifikasi: “${title}” berhasil diunggah ke YouTube.`;
+  uploadNotification.hidden = false;
+  if ('Notification' in window && Notification.permission === 'granted') new Notification('Video berhasil diunggah', { body: title });
+}
 
 function setStatus(message, tone = '') {
   statusNode.textContent = message;
@@ -84,6 +99,8 @@ async function loadSettings() {
     setAccount('drive', driveConnected, driveConnected ? 'Izin baca-saja aktif.' : 'Hubungkan akun pemilik folder sumber.');
     if (auto.lastVideoId) { resultLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(auto.lastVideoId)}`; resultLink.hidden = false; }
     else resultLink.hidden = true;
+    notifySuccessfulUpload(auto);
+    initialUploadStatusLoaded = true;
     const state = auto.status === 'uploaded' ? `Unggahan terakhir: ${auto.lastFileName || 'video'}${auto.lastUploadedAt ? ` · ${new Date(auto.lastUploadedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' })} WIB` : ''}.` : auto.enabled ? (auto.status === 'error' ? `Unggah terakhir gagal: ${auto.lastError || 'periksa konfigurasi server.'}` : 'Antrean aktif. Video berikutnya diproses sekitar 18.00 WIB.') : 'Otomatis belum diaktifkan.';
     setStatus(state, auto.status === 'error' ? 'error' : auto.status === 'uploaded' ? 'ok' : '');
   } catch (error) { setStatus(error.message || 'Status antrean belum dapat dimuat.', 'error'); }
@@ -127,3 +144,4 @@ saveButton.addEventListener('click', async () => {
   finally { saving = false; saveButton.disabled = false; saveButton.textContent = 'Simpan pengaturan'; setAccount('youtube', youtubeConnected); setAccount('drive', driveConnected); }
 });
 void initialize();
+setInterval(() => { void loadSettings(); }, 30000);
