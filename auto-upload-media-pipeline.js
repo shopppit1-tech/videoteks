@@ -125,9 +125,9 @@ export function createAutoUploadMediaPipeline(dependencies) {
     const audioDurations = [audioProbe.streams?.[0]?.duration, audioProbe.format?.duration].map(Number).filter((value) => Number.isFinite(value) && value > 0);
     const audioDuration = audioDurations[0];
     if (!audioDuration) throw new Error('Durasi audio suara AI tidak dapat dibaca.');
-    const videoNeedsLoop = videoDuration + 0.05 < audioDuration;
-    const ffmpegArgs = videoNeedsLoop
-      ? ['-y', '-stream_loop', '-1', '-i', videoPath, '-i', audioPath, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0', '-t', audioDuration.toFixed(3), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart']
+    const videoNeedsSlowdown = videoDuration + 0.05 < audioDuration;
+    const ffmpegArgs = videoNeedsSlowdown
+      ? ['-y', '-i', videoPath, '-i', audioPath, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0', '-vf', `setpts=${(audioDuration / videoDuration).toFixed(6)}*PTS`, '-t', audioDuration.toFixed(3), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart']
       : ['-y', '-i', videoPath, '-i', audioPath, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0', '-t', audioDuration.toFixed(3), '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart'];
     await exec('ffmpeg', [...ffmpegArgs, outputPath]);
     const outputStats = await fs.stat(outputPath);
