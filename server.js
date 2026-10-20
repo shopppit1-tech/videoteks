@@ -450,6 +450,7 @@ async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
     if (!/^[A-Za-z0-9_-]+$/.test(file.id)) throw new Error('ID video Drive tidak valid.');
     videoPath = await downloadGoogleDriveVideo(driveAccessToken, file);
     pipelineResult = await autoUploadMediaPipeline(videoPath, (stage) => setAutoUploadStage(jobRef, leaseId, stage));
+    console.info('[youtube-auto-upload] media result:', JSON.stringify({ fileName: file.name, videoDuration: pipelineResult.videoDuration, audioDuration: pipelineResult.audioDuration, subtitleCount: pipelineResult.segmentCount, subtitleStyle: '8px pink bold' }));
     const metadata = pipelineResult.metadata;
     if (!metadata?.title || !metadata?.description) throw new Error('Gemini utama gagal membuat judul dan deskripsi.');
     await setAutoUploadStage(jobRef, leaseId, 'uploading');

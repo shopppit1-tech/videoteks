@@ -115,15 +115,24 @@ export function createAutoUploadMediaPipeline(dependencies) {
   }
 
   async function replaceVideoAudio(videoPath, audioPath, outputPath) {
+    const videoProbeResult = await exec('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration:format=duration', '-of', 'json', videoPath]);
+    const videoProbe = JSON.parse(videoProbeResult.stdout || '{}');
+    const videoDurations = [videoProbe.streams?.[0]?.duration, videoProbe.format?.duration].map(Number).filter((value) => Number.isFinite(value) && value > 0);
+    const videoDuration = videoDurations[0];
+    if (!videoDuration) throw new Error('Durasi video tidak dapat dibaca untuk mengganti audio.');
     const audioProbeResult = await exec('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=duration:format=duration', '-of', 'json', audioPath]);
     const audioProbe = JSON.parse(audioProbeResult.stdout || '{}');
     const audioDurations = [audioProbe.streams?.[0]?.duration, audioProbe.format?.duration].map(Number).filter((value) => Number.isFinite(value) && value > 0);
     const audioDuration = audioDurations[0];
     if (!audioDuration) throw new Error('Durasi audio suara AI tidak dapat dibaca.');
-    const ffmpegArgs = ['-y', '-stream_loop', '-1', '-i', videoPath, '-i', audioPath, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0', '-t', audioDuration.toFixed(3), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart'];
+    const videoNeedsLoop = videoDuration + 0.05 < audioDuration;
+    const ffmpegArgs = videoNeedsLoop
+      ? ['-y', '-stream_loop', '-1', '-i', videoPath, '-i', audioPath, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0', '-t', audioDuration.toFixed(3), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart']
+      : ['-y', '-i', videoPath, '-i', audioPath, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0', '-t', audioDuration.toFixed(3), '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart'];
     await exec('ffmpeg', [...ffmpegArgs, outputPath]);
     const outputStats = await fs.stat(outputPath);
     if (!outputStats.size) throw new Error('Video setelah penggantian audio kosong.');
+    return { videoDuration, audioDuration };
   }
 
   async function transcribeForSubtitles(videoPath) {
@@ -210,12 +219,12 @@ export function createAutoUploadMediaPipeline(dependencies) {
       await onStage('voice');
       await synthesizeNarration(narration, voiceAudioPath);
       await onStage('replacing-audio');
-      await replaceVideoAudio(videoPath, voiceAudioPath, audioReplacedPath);
+      const durationResult = await replaceVideoAudio(videoPath, voiceAudioPath, audioReplacedPath);
       await onStage('transcribing-subtitles');
       const segments = await transcribeForSubtitles(audioReplacedPath);
       await onStage('rendering-subtitles');
       await renderSubtitles(audioReplacedPath, segments, subtitlePath, finalVideoPath);
-      return { finalVideoPath, cleanupPaths, narration, metadata: narrationResult.metadata, segmentCount: segments.length };
+      return { finalVideoPath, cleanupPaths, narration, metadata: narrationResult.metadata, segmentCount: segments.length, ...durationResult };
     } catch (error) {
       await cleanup(...cleanupPaths);
       throw error;
