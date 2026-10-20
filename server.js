@@ -393,9 +393,8 @@ async function processOneAutoUpload(jobSnapshot) {
   let pipelineResult = null;
   try {
     const config = youtubeOAuthConfig();
-    const seoConfig = youtubeSeoAIConfig();
     if (!config) throw new Error('Integrasi Google OAuth belum dikonfigurasi di server.');
-    if (!seoConfig && !geminiKeysInRotation().length) throw new Error('Gemini utama belum dikonfigurasi di server.');
+    if (!geminiKeysInRotation().length) throw new Error('Gemini utama belum dikonfigurasi di server.');
     if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2 && !process.env.GEMINI_API_KEY_3) throw new Error('GEMINI_API_KEY untuk membuat narasi dan subtitle belum dikonfigurasi di server.');
     if (!process.env.GEMINI_TTS_API_KEY) throw new Error('GEMINI_TTS_API_KEY untuk membuat suara AI belum dikonfigurasi di server.');
     const folderId = googleDriveFolderId(claim.settings.folderId);
@@ -412,16 +411,8 @@ async function processOneAutoUpload(jobSnapshot) {
     if (!/^[A-Za-z0-9_-]+$/.test(file.id)) throw new Error('ID video Drive tidak valid.');
     videoPath = await downloadGoogleDriveVideo(driveAccessToken, file);
     pipelineResult = await autoUploadMediaPipeline(videoPath, (stage) => setAutoUploadStage(jobRef, leaseId, stage));
-    await setAutoUploadStage(jobRef, leaseId, 'metadata');
-    let metadata;
-    try {
-      if (!seoConfig) throw new Error('Gemini SEO khusus tidak tersedia; gunakan Gemini utama.');
-      metadata = await generateYoutubeSeoFromFile(pipelineResult.finalVideoPath, file.name, '', 'Indonesian', seoConfig);
-    } catch (seoError) {
-      console.warn('[youtube-auto-upload] SEO khusus gagal, memakai Gemini utama dari narasi/subtitle:', seoError.message || seoError.name);
-      metadata = await generateYoutubeMetadataFromCaptions(pipelineResult.narration, 'Indonesian');
-      if (!metadata) throw new Error('Gemini utama gagal membuat judul dan deskripsi dari subtitle.');
-    }
+    const metadata = pipelineResult.metadata;
+    if (!metadata?.title || !metadata?.description) throw new Error('Gemini utama gagal membuat judul dan deskripsi.');
     await setAutoUploadStage(jobRef, leaseId, 'uploading');
     const uploaded = await uploadVideoToYoutube(youtubeAccessToken, pipelineResult.finalVideoPath, { ...file, mimeType: 'video/mp4' }, {
       snippet: { title: metadata.title, description: metadata.description, ...(metadata.tags.length ? { tags: metadata.tags } : {}) },
