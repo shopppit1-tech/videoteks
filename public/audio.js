@@ -146,6 +146,15 @@ function updateFitInfo() {
     fitInfo.textContent = 'Membaca durasi video dan audio...';
     return;
   }
+  if (speedMode.value === 'auto') {
+    const adjustment = videoDuration > audioDuration + 0.05
+      ? 'video dipotong'
+      : videoDuration < audioDuration - 0.05
+        ? 'video diulang'
+        : 'durasi sudah pas';
+    fitInfo.textContent = `Video mengikuti audio · hasil ${audioDuration.toFixed(1)} dtk · ${adjustment}; audio tetap utuh.`;
+    return;
+  }
   const speed = speedMode.value === 'manual' ? Number(manualSpeedSlider.value) : audioDuration / videoDuration;
   const adjustedDuration = audioDuration / speed;
   if (speedMode.value === 'manual') {
@@ -216,7 +225,7 @@ replaceBtn.onclick = async () => {
   busy = true;
   updateButton();
   clearProgress();
-  const modeMessage = speedMode.value === 'auto' ? 'Menyamakan kecepatan audio dengan durasi video...' : speedMode.value === 'manual' ? `Mengatur kecepatan audio ${Number(manualSpeedSlider.value).toFixed(2)}×...` : 'Mengganti suara tanpa mengubah kecepatan...';
+  const modeMessage = speedMode.value === 'auto' ? 'Menyesuaikan video agar mengikuti durasi audio...' : speedMode.value === 'manual' ? `Mengatur kecepatan audio ${Number(manualSpeedSlider.value).toFixed(2)}×...` : 'Mengganti suara tanpa mengubah kecepatan...';
   setStatus(modeMessage);
   replaceBtn.textContent = speedMode.value === 'manual' ? 'Menerapkan kecepatan...' : 'Memproses video...';
 

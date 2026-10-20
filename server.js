@@ -1021,31 +1021,38 @@ app.post('/api/replace-audio', requireFirebaseUser, upload.fields([{ name: 'vide
     const audioMode = ['auto', 'manual', 'original'].includes(requestedMode) ? requestedMode : (req.body.fitAudio === 'false' ? 'original' : 'auto');
     const requestedManualSpeed = Number(req.body.manualSpeed);
     const manualSpeed = Number.isFinite(requestedManualSpeed) ? Math.min(2, Math.max(0.5, requestedManualSpeed)) : 1;
-    const speed = audioMode === 'manual' ? manualSpeed : audioDuration / duration;
+    const speed = audioMode === 'manual' ? manualSpeed : 1;
+    const outputDuration = audioMode === 'auto' ? audioDuration : duration;
     const atempoFilters = [];
-    if (audioMode !== 'original') {
+    if (audioMode === 'manual') {
       let remainingSpeed = speed;
       while (remainingSpeed > 2) { atempoFilters.push('atempo=2'); remainingSpeed /= 2; }
       while (remainingSpeed < 0.5) { atempoFilters.push('atempo=0.5'); remainingSpeed /= 0.5; }
       atempoFilters.push(`atempo=${remainingSpeed.toFixed(6)}`);
     }
 
-    const inputArgs = ['-y', '-i', videoFile.path];
+    const inputArgs = ['-y'];
+    if (audioMode === 'auto') inputArgs.push('-stream_loop', '-1');
+    inputArgs.push('-i', videoFile.path);
     if (audioMode === 'original') inputArgs.push('-stream_loop', '-1');
     inputArgs.push('-i', audioFile.path);
     const commonArgs = [...inputArgs, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0'];
-    if (audioMode !== 'original') commonArgs.push('-af', `${atempoFilters.join(',')},apad`);
-    commonArgs.push('-t', duration.toFixed(3), '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
-    let videoMode = 'copy';
-    try {
-      await exec('ffmpeg', [...commonArgs, '-c:v', 'copy', out]);
-    } catch {
-      await cleanup(out);
-      videoMode = 'h264-fallback';
+    if (audioMode === 'manual') commonArgs.push('-af', `${atempoFilters.join(',')},apad`);
+    commonArgs.push('-t', outputDuration.toFixed(3), '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
+    let videoMode = audioMode === 'auto' ? 'h264-fit-to-audio' : 'copy';
+    if (audioMode === 'auto') {
       await exec('ffmpeg', [...commonArgs, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', out]);
+    } else {
+      try {
+        await exec('ffmpeg', [...commonArgs, '-c:v', 'copy', out]);
+      } catch {
+        await cleanup(out);
+        videoMode = 'h264-fallback';
+        await exec('ffmpeg', [...commonArgs, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', out]);
+      }
     }
     const outputStats = await fs.stat(out);
-    console.info(`[replace-audio] complete videoMode=${videoMode} audioMode=${audioMode} speed=${audioMode === 'original' ? 'original' : speed.toFixed(3)} videoDuration=${duration.toFixed(2)} audioDuration=${audioDuration.toFixed(2)} inputVideoBytes=${videoFile.size} inputAudioBytes=${audioFile.size} outputBytes=${outputStats.size}`);
+    console.info(`[replace-audio] complete videoMode=${videoMode} audioMode=${audioMode} speed=${audioMode === 'manual' ? speed.toFixed(3) : 'unchanged'} videoDuration=${duration.toFixed(2)} audioDuration=${audioDuration.toFixed(2)} outputDuration=${outputDuration.toFixed(2)} inputVideoBytes=${videoFile.size} inputAudioBytes=${audioFile.size} outputBytes=${outputStats.size}`);
     let historyId = null;
     try {
       const historyDoc = await historyCollection(req.firebaseUser.uid).add({
@@ -1054,9 +1061,10 @@ app.post('/api/replace-audio', requireFirebaseUser, upload.fields([{ name: 'vide
         fileName: String(videoFile.originalname || 'video').replace(/[\u0000-\u001f]/g, '').slice(0, 180),
         audioFileName: String(audioFile.originalname || 'audio').replace(/[\u0000-\u001f]/g, '').slice(0, 180),
         audioMode,
-        speed: audioMode === 'original' ? null : Number(speed.toFixed(3)),
+        speed: audioMode === 'manual' ? Number(speed.toFixed(3)) : null,
         videoDuration: Number(duration.toFixed(2)),
         audioDuration: Number(audioDuration.toFixed(2)),
+        outputDuration: Number(outputDuration.toFixed(2)),
         createdAt: Date.now(),
         updatedAt: Date.now()
       });

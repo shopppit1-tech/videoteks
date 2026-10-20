@@ -88,11 +88,11 @@ h1{margin:0;font-size:clamp(25px,7vw,34px);line-height:1.08;letter-spacing:-.8px
       <input id="audioInput" type="file" accept="audio/*" aria-label="Pilih file audio">
     </label>
     <div class="speed-controls">
-      <label for="speedMode">Atur kecepatan audio</label>
+      <label for="speedMode">Penyesuaian durasi</label>
       <select id="speedMode" class="speed-mode">
-        <option value="auto">Otomatis — pas dengan durasi audio</option>
+        <option value="auto">Otomatis — video mengikuti durasi audio</option>
         <option value="manual">Manual — saya atur sendiri</option>
-        <option value="original">Kecepatan asli</option>
+        <option value="original">Kecepatan asli — durasi video tetap</option>
       </select>
       <div id="manualSpeed" class="manual-speed" hidden>
         <div class="speed-labels"><span>0,50× lambat</span><strong id="manualSpeedValue">1,00×</strong><span>2,00× cepat</span></div>
@@ -105,7 +105,7 @@ h1{margin:0;font-size:clamp(25px,7vw,34px);line-height:1.08;letter-spacing:-.8px
       <video id="videoPreview" controls muted playsinline hidden></video>
       <audio id="audioPreview" controls hidden></audio>
     </div>
-    <p class="note">Suara asli video akan dilepas. Pilih Otomatis untuk menyamakan durasi, Manual untuk mengatur kecepatan sendiri, atau Kecepatan asli. Hasil unduhan tetap sepanjang video.</p>
+    <p class="note">Suara asli video akan dilepas. Otomatis: video dipotong atau diulang agar sepanjang audio, tanpa mengubah audio. Manual: atur kecepatan audio. Kecepatan asli: durasi video tetap.</p>
     <button id="replaceBtn" class="btn" type="button" disabled>Ganti suara &amp; unduh</button>
     <div id="progress" class="progress" role="progressbar" aria-label="Progres unduhan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div id="progressFill" class="progress-fill"></div></div>
     <div id="resultActions" class="result-actions" hidden><a href="app.html?generated=1&amp;standalone=1">Lanjut ke Subtitle Video</a></div>
