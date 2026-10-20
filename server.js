@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -1561,7 +1561,8 @@ app.post('/api/internal/youtube-auto-upload/run', async (req, res) => {
       return counts;
     }, {});
     console.info('[youtube-auto-upload] daily run:', JSON.stringify(summary));
-    res.set('Cache-Control', 'no-store').json({ ok: true, summary });
+    const hasErrors = Number(summary.error || 0) > 0;
+    res.set('Cache-Control', 'no-store').status(hasErrors ? 502 : 200).json({ ok: !hasErrors, summary });
   } catch (error) {
     console.error('[youtube-auto-upload] daily run failed:', error.message || error.name);
     res.status(500).json({ error: 'Pemrosesan antrean YouTube harian gagal.' });
