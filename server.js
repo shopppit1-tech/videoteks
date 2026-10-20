@@ -138,6 +138,22 @@ async function saveAutoUploadHistory(uid, details) {
   }
 }
 
+async function recoverInterruptedAutoUploads() {
+  if (!firebaseDb) return;
+  try {
+    const snapshot = await firebaseDb.collection('youtubeAutoUploadJobs').where('processing', '==', true).get();
+    await Promise.all(snapshot.docs.map(async (jobSnapshot) => {
+      const data = jobSnapshot.data() || {};
+      const error = 'Pemrosesan dihentikan saat server melakukan restart; antrean dapat dicoba lagi.';
+      await jobSnapshot.ref.set({ processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'error', lastError: error, lastAttemptAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+      await saveAutoUploadHistory(jobSnapshot.id, { status: 'error', fileName: data.lastFileName, error });
+    }));
+    if (snapshot.size) console.warn(`[youtube-auto-upload] memulihkan ${snapshot.size} antrean yang terputus saat restart.`);
+  } catch (error) {
+    console.warn('[youtube-auto-upload] gagal memulihkan antrean saat startup:', error.message || error.name);
+  }
+}
+
 function youtubeOAuthConfig() {
   const clientId = process.env.YOUTUBE_CLIENT_ID;
   const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
@@ -1748,4 +1764,7 @@ app.post('/api/generate-voice', requireFirebaseUser, async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`VideoTeks Gemini berjalan di port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`VideoTeks Gemini berjalan di port ${PORT}`);
+  void recoverInterruptedAutoUploads();
+});
