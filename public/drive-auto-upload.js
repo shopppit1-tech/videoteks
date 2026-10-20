@@ -14,6 +14,7 @@ const resultLink = $('#result');
 let youtubeClient = null;
 let driveClient = null;
 let youtubeConnected = false;
+let youtubeEmailNotifications = false;
 let driveConnected = false;
 let saving = false;
 let authTimer = null;
@@ -38,7 +39,9 @@ function setAccount(type, connected, message = '') {
   const disconnect = $(`#${prefix}Disconnect`);
   label.textContent = connected ? `${type === 'youtube' ? 'YouTube' : 'Google Drive'} terhubung` : `${type === 'youtube' ? 'YouTube' : 'Google Drive'} belum terhubung`;
   hint.textContent = message || (connected ? (type === 'drive' ? 'Izin baca-saja aktif.' : 'Akun siap menerima unggahan.') : 'Hubungkan akun untuk melanjutkan.');
-  connect.hidden = connected;
+  const needsEmailPermission = type === 'youtube' && connected && !youtubeEmailNotifications;
+  connect.hidden = connected && !needsEmailPermission;
+  connect.textContent = needsEmailPermission ? 'Aktifkan email' : (type === 'youtube' ? 'Hubungkan YouTube' : 'Hubungkan Drive');
   disconnect.hidden = !connected;
   connect.disabled = saving || (type === 'youtube' ? !youtubeClient : !driveClient);
   disconnect.disabled = saving;
@@ -76,7 +79,8 @@ async function loadSettings() {
     driveConnected = Boolean(drive.connected);
     folderInput.value = auto.folderId || '';
     enabledInput.checked = Boolean(auto.enabled);
-    setAccount('youtube', youtubeConnected, youtubeConnected ? 'Akun siap menerima unggahan.' : 'Hubungkan akun channel tujuan.');
+    youtubeEmailNotifications = Boolean(youtube.emailNotifications);
+    setAccount('youtube', youtubeConnected, youtubeConnected ? (youtubeEmailNotifications ? 'Akun siap menerima unggahan dan notifikasi email.' : 'Akun siap menerima unggahan. Lepas lalu hubungkan kembali untuk mengaktifkan notifikasi email.') : 'Hubungkan akun channel tujuan.');
     setAccount('drive', driveConnected, driveConnected ? 'Izin baca-saja aktif.' : 'Hubungkan akun pemilik folder sumber.');
     if (auto.lastVideoId) { resultLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(auto.lastVideoId)}`; resultLink.hidden = false; }
     else resultLink.hidden = true;
@@ -88,7 +92,7 @@ async function initialize() {
   try {
     const [youtube, drive, oauth] = await Promise.all([api('/api/youtube/status'), api('/api/youtube/drive/status'), waitForGoogle()]);
     youtubeConnected = Boolean(youtube.connected); driveConnected = Boolean(drive.connected);
-    youtubeClient = oauth.initCodeClient({ client_id: youtube.clientId, scope: 'https://www.googleapis.com/auth/youtube.upload', ux_mode: 'popup', callback: (response) => connectGoogle(response, 'youtube') });
+    youtubeClient = oauth.initCodeClient({ client_id: youtube.clientId, scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/gmail.send', include_granted_scopes: true, ux_mode: 'popup', callback: (response) => connectGoogle(response, 'youtube') });
     if (drive.configured && drive.clientId) driveClient = oauth.initCodeClient({ client_id: drive.clientId, scope: 'https://www.googleapis.com/auth/drive.readonly', include_granted_scopes: true, ux_mode: 'popup', callback: (response) => connectGoogle(response, 'drive') });
     setAccount('youtube', youtubeConnected);
     setAccount('drive', driveConnected, drive.configured ? '' : 'Integrasi Google belum dikonfigurasi di server.');

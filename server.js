@@ -116,6 +116,11 @@ function youtubeAutoUploadJobRef(uid) {
   return firebaseDb.collection('youtubeAutoUploadJobs').doc(uid);
 }
 
+async function firebaseUserEmail(uid) {
+  const user = await firebaseAdminAuth.getUser(uid);
+  return String(user.email || '').trim();
+}
+
 async function saveAutoUploadHistory(uid, details) {
   try {
     const status = String(details.status || 'error');
@@ -244,6 +249,7 @@ async function youtubeTokenRequest(parameters) {
 }
 
 const GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const AUTO_UPLOAD_REPO = 'shopppit1-tech/videoteks';
 const AUTO_UPLOAD_WORKFLOW = `${AUTO_UPLOAD_REPO}/.github/workflows/youtube-auto-upload.yml@refs/heads/main`;
 const AUTO_UPLOAD_OIDC_AUDIENCE = 'videoteks-youtube-daily-upload';
@@ -380,6 +386,42 @@ async function uploadVideoToYoutube(accessToken, filePath, file, metadata) {
   return result;
 }
 
+function base64Url(value) {
+  return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function sendUploadSuccessEmail(accessToken, recipient, { fileName, title, youtubeVideoId, uploadedAt }) {
+  const safeRecipient = String(recipient || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeRecipient)) throw new Error('Email pengguna tidak valid untuk notifikasi.');
+  const youtubeUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(String(youtubeVideoId || ''))}`;
+  const dateText = new Date(uploadedAt || Date.now()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'full', timeStyle: 'short' });
+  const subject = `Video berhasil diunggah ke YouTube: ${String(title || fileName || 'Video').slice(0, 120)}`;
+  const body = [
+    'VideoTeks berhasil mengunggah video ke YouTube.',
+    '',
+    `File Drive: ${String(fileName || 'Video')}`,
+    `Judul YouTube: ${String(title || 'Video')}`,
+    `Waktu unggah: ${dateText} WIB`,
+    `Tautan YouTube: ${youtubeUrl}`
+  ].join('\n');
+  const raw = [
+    `To: ${safeRecipient}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
+    '',
+    body
+  ].join('\r\n');
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: base64Url(raw) }),
+    signal: AbortSignal.timeout(15000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || `Email notifikasi gagal dikirim (HTTP ${response.status}).`);
+}
+
 async function verifyGithubActionsOidcToken(token) {
   const parts = String(token || '').split('.');
   if (parts.length !== 3 || token.length > 12000) throw new Error('Token otomatis tidak valid.');
@@ -468,6 +510,15 @@ async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
       transaction.set(jobRef, { processing: false, processingUntil: 0, processingStage: '', leaseId: '', status: 'uploaded', lastUploadDate: today, lastUploadedAt: completedAt, lastFileName: String(file.name || '').slice(0, 180), lastTitle: metadata.title, lastVideoId: uploaded.id, lastError: '', updatedAt: completedAt }, { merge: true });
     });
     await saveAutoUploadHistory(uid, { status: 'uploaded', fileName: file.name, driveFileId: file.id, youtubeVideoId: uploaded.id, title: metadata.title, description: metadata.description });
+    if (String(claim.settings.emailNotifications || 'enabled') !== 'disabled') {
+      try {
+        const integrationData = (await youtubeIntegrationRef(uid).get()).data() || {};
+        const scopes = Array.isArray(integrationData.scopes) ? integrationData.scopes : [];
+        if (scopes.includes(GMAIL_SEND_SCOPE)) await sendUploadSuccessEmail(youtubeAccessToken, await firebaseUserEmail(uid), { fileName: file.name, title: metadata.title, youtubeVideoId: uploaded.id, uploadedAt: Date.now() });
+      } catch (emailError) {
+        console.warn('[youtube-auto-upload] upload sukses, tetapi email notifikasi gagal:', emailError.message || emailError.name);
+      }
+    }
     return { status: 'uploaded' };
   } catch (error) {
     console.error('[youtube-auto-upload] job failed:', error.message || error.name || 'Error');
@@ -1077,7 +1128,8 @@ app.get('/api/youtube/status', requireFirebaseUser, async (req, res) => {
   if (!config) return res.status(503).json({ error: 'Integrasi YouTube belum dikonfigurasi di server.' });
   try {
     const snapshot = await youtubeIntegrationRef(req.firebaseUser.uid).get();
-    res.json({ configured: true, connected: Boolean(snapshot.data()?.refreshTokenEncrypted), clientId: config.clientId });
+    const data = snapshot.data() || {};
+    res.json({ configured: true, connected: Boolean(data.refreshTokenEncrypted), emailNotifications: Array.isArray(data.scopes) && data.scopes.includes(GMAIL_SEND_SCOPE), clientId: config.clientId });
   } catch (error) {
     console.error('[youtube] gagal membaca status koneksi:', error.message);
     res.status(500).json({ error: 'Status koneksi YouTube gagal dimuat.' });
@@ -1366,7 +1418,7 @@ app.post('/api/youtube/connect', requireFirebaseUser, async (req, res) => {
       connectedAt: existing.data()?.connectedAt || Date.now(),
       updatedAt: Date.now()
     }, { merge: true });
-    res.json({ connected: true, accessToken: tokens.access_token });
+    res.json({ connected: true, emailNotifications: grantedScopes.includes(GMAIL_SEND_SCOPE), accessToken: tokens.access_token });
   } catch (error) {
     const oauthError = error.oauthError;
     console.error('[youtube] gagal menyambungkan akun:', oauthError || error.message);
