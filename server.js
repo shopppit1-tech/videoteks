@@ -1533,7 +1533,7 @@ app.get('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
       lastFileName: job.lastFileName || '',
       lastTitle: job.lastTitle || '',
       lastVideoId: job.lastVideoId || null,
-      scheduleTime: '10:05',
+      scheduleTime: '18:00',
       timeZone: 'Asia/Jakarta',
       privacyStatus: 'public'
     });
@@ -1572,14 +1572,14 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
       folderName,
       enabled,
       pipelineVersion: AUTO_UPLOAD_PIPELINE_VERSION,
-      scheduleTime: '10:05',
+      scheduleTime: '18:00',
       timeZone: 'Asia/Jakarta',
       privacyStatus: 'public',
       status: enabled ? 'waiting' : 'disabled',
       lastError: '',
       updatedAt: Date.now()
     }, { merge: true });
-    res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '10:05', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
+    res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '18:00', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
   } catch (error) {
     console.error('[youtube-auto-upload] gagal menyimpan pengaturan:', error.message || error.name);
     res.status(error.status === 401 || error.status === 403 ? 400 : 502).json({ error: error.message || 'Pengaturan upload otomatis gagal disimpan.' });
