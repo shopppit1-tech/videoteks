@@ -30,4 +30,4 @@ jobs:
             -X POST "$API_URL" \
             -H "Authorization: Bearer ${OIDC_TOKEN}" \
             -H 'Content-Type: application/json' \
-            --data '{}'
+            --data '{"force": ${{ github.event_name == 'workflow_dispatch' }}}'

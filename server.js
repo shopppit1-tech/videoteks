@@ -410,7 +410,7 @@ function jakartaDate(date = new Date()) {
   return `${fields.year}-${fields.month}-${fields.day}`;
 }
 
-async function processOneAutoUpload(jobSnapshot) {
+async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
   const uid = jobSnapshot.id;
   const jobRef = youtubeAutoUploadJobRef(uid);
   const today = jakartaDate();
@@ -421,7 +421,7 @@ async function processOneAutoUpload(jobSnapshot) {
     const current = snapshot.data() || {};
     if (!snapshot.exists || !current.enabled) return { status: 'disabled' };
     if (current.pipelineVersion !== AUTO_UPLOAD_PIPELINE_VERSION) return { status: 'needs_confirmation' };
-    if (current.lastUploadDate === today) return { status: 'already_uploaded' };
+    if (current.lastUploadDate === today && !force) return { status: 'already_uploaded' };
     if (Number(current.processingUntil || 0) > now) return { status: 'busy' };
     transaction.set(jobRef, { processing: true, processingStartedAt: now, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
     return { status: 'claimed', settings: current };
@@ -1595,9 +1595,10 @@ app.post('/api/internal/youtube-auto-upload/run', async (req, res) => {
   }
   if (!firebaseDb) return res.status(503).json({ error: 'Firestore belum dikonfigurasi untuk antrean otomatis.' });
   try {
+    const force = req.body?.force === true;
     const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
     const results = [];
-    for (const job of jobs.docs) results.push(await processOneAutoUpload(job));
+    for (const job of jobs.docs) results.push(await processOneAutoUpload(job, { force }));
     const summary = results.reduce((counts, result) => {
       counts[result.status] = (counts[result.status] || 0) + 1;
       return counts;
