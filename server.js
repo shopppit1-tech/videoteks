@@ -268,12 +268,23 @@ async function refreshAccessTokenForIntegration(ref, config, integrationName) {
   const encryptedToken = snapshot.data()?.refreshTokenEncrypted;
   if (!encryptedToken) throw new Error(`Akun ${integrationName} belum terhubung.`);
   const refreshToken = decryptYoutubeRefreshToken(encryptedToken, config.encryptionKey);
-  const tokens = await youtubeTokenRequest({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    refresh_token: refreshToken,
-    grant_type: 'refresh_token'
-  });
+  let tokens;
+  try {
+    tokens = await youtubeTokenRequest({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    });
+  } catch (error) {
+    if (error.oauthError !== 'invalid_grant') throw error;
+    await ref.delete().catch(() => {});
+    const reconnectError = new Error(`Izin ${integrationName} sudah kedaluwarsa atau dicabut. Tekan "${integrationName === 'Google Drive' ? 'Hubungkan Drive' : 'Hubungkan YouTube'}" untuk menyambungkan kembali.`);
+    reconnectError.status = 401;
+    reconnectError.reconnect = true;
+    reconnectError.integration = integrationName === 'Google Drive' ? 'drive' : 'youtube';
+    throw reconnectError;
+  }
   if (!tokens.access_token) throw new Error(`Akses ${integrationName} tidak dapat diperbarui.`);
   const update = { lastRefreshedAt: Date.now() };
   if (tokens.refresh_token) update.refreshTokenEncrypted = encryptYoutubeRefreshToken(tokens.refresh_token, config.encryptionKey);
@@ -1633,6 +1644,10 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
     }, { merge: true });
     res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '18:00', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
   } catch (error) {
+    if (error.reconnect) {
+      console.warn('[youtube-auto-upload] izin integrasi perlu disambungkan ulang:', error.integration);
+      return res.status(401).json({ error: error.message, reconnect: true, integration: error.integration });
+    }
     console.error('[youtube-auto-upload] gagal menyimpan pengaturan:', error.message || error.name);
     res.status(error.status === 401 || error.status === 403 ? 400 : 502).json({ error: error.message || 'Pengaturan upload otomatis gagal disimpan.' });
   }

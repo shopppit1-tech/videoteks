@@ -148,6 +148,7 @@ async function apiRequest(url, options = {}) {
     const error = new Error(data.error || `Permintaan gagal (HTTP ${response.status}).`);
     error.status = response.status;
     error.reconnect = Boolean(data.reconnect);
+    error.integration = data.integration || '';
     throw error;
   }
   return data;
@@ -308,6 +309,10 @@ async function saveAutoUploadSettings() {
     autoUploadStatus.className = 'status';
     await loadAutoUploadSettings();
   } catch (error) {
+    if (error.reconnect && error.integration === 'drive') {
+      driveConnected = false;
+      updateDriveConnectionUI();
+    }
     autoUploadStatus.textContent = error.message || 'Pengaturan upload otomatis gagal disimpan.';
     autoUploadStatus.className = 'status error';
   } finally {

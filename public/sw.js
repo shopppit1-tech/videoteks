@@ -25,7 +25,7 @@ const SHELL_FILES = [
   'voice.js',
   'youtube.html',
   'youtube.js',
-  'youtube.js?v=seo-video-content-4',
+  'youtube.js?v=drive-auto-3',
   'drive-auto-upload.html',
   'drive-auto-upload.js?v=1',
   'youtube-handoff.js',
