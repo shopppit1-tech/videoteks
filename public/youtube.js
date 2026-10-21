@@ -1,8 +1,12 @@
 import { authenticatedFetch, requireLogin } from './firebase-client.js';
 import { loadYoutubeHandoff } from './youtube-handoff.js';
 
-const UPLOAD_SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
+const YOUTUBE_OAUTH_SCOPES = [
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.force-ssl'
+].join(' ');
 const UPLOAD_ENDPOINT = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status';
+const CAPTIONS_UPLOAD_ENDPOINT = 'https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet';
 await requireLogin();
 
 // Fallback for Android/PWA webviews that swallow native page scrolling.
@@ -61,6 +65,8 @@ let seoTags = [];
 let seoGenerationPromise = null;
 let sourceCaptions = '';
 let sourceLanguage = '';
+let sourceSubtitleSrt = '';
+let sourceCaptionLanguage = null;
 let loadingHandoff = false;
 let authorizationTimer = null;
 let driveAuthorizationTimer = null;
@@ -117,7 +123,9 @@ function parseSeoTags(value) {
 
 function apiErrorMessage(text, statusCode) {
   const response = parseResponse(text);
-  const message = response?.error || response?.error_description;
+  const message = (typeof response?.error === 'string' ? response.error : response?.error?.message)
+    || response?.error_description
+    || response?.error?.errors?.[0]?.message;
   if (message) return message;
   if (statusCode === 401) return 'Sesi YouTube perlu diperbarui. Hubungkan akun kembali, lalu ulangi unggahan.';
   if (statusCode === 403) return 'Akses unggah ditolak. Pastikan layanan unggah video diaktifkan untuk aplikasi ini.';
@@ -361,6 +369,47 @@ function createMultipartBody(file, metadata) {
   return new Blob([firstPart, file, lastPart], { type: `multipart/related; boundary=${boundary}` });
 }
 
+const CAPTION_LANGUAGE_MAP = {
+  Indonesian: { code: 'id', name: 'Bahasa Indonesia' },
+  English: { code: 'en', name: 'English' },
+  Spanish: { code: 'es', name: 'Español' },
+  Arabic: { code: 'ar', name: 'العربية' },
+  Japanese: { code: 'ja', name: '日本語' },
+  Korean: { code: 'ko', name: '한국어' },
+  Chinese: { code: 'zh-Hans', name: '中文' }
+};
+
+function createCaptionMultipartBody(srt, metadata) {
+  const random = globalThis.crypto?.randomUUID?.().replaceAll('-', '') || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  const boundary = `videoteks-caption-${random}`;
+  const firstPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`;
+  const lastPart = `\r\n--${boundary}--\r\n`;
+  return new Blob([firstPart, srt, lastPart], { type: `multipart/related; boundary=${boundary}` });
+}
+
+async function uploadCaptionTrack(videoId, srt, language, token) {
+  const body = createCaptionMultipartBody(srt, {
+    snippet: {
+      videoId,
+      language: language.code,
+      name: `VideoTeks · ${language.name}`,
+      isDraft: false
+    }
+  });
+  const response = await fetch(CAPTIONS_UPLOAD_ENDPOINT, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': body.type },
+    body
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(apiErrorMessage(text, response.status));
+    error.status = response.status;
+    throw error;
+  }
+  return parseResponse(text);
+}
+
 function uploadVideo(file, metadata, token) {
   return new Promise((resolve, reject) => {
     const body = createMultipartBody(file, metadata);
@@ -427,7 +476,8 @@ async function initializeOAuth() {
     const oauth = await waitForIdentityLibrary();
     codeClient = oauth.initCodeClient({
       client_id: status.clientId,
-      scope: UPLOAD_SCOPE,
+      scope: YOUTUBE_OAUTH_SCOPES,
+      include_granted_scopes: true,
       ux_mode: 'popup',
       callback: handleAuthorizationCode,
       error_callback: (error) => {
@@ -495,6 +545,8 @@ async function loadHandoffVideo() {
     fileInput.dispatchEvent(new Event('change'));
     sourceCaptions = String(record.captions || '');
     sourceLanguage = String(record.language || '');
+    sourceSubtitleSrt = String(record.subtitleSrt || '');
+    sourceCaptionLanguage = CAPTION_LANGUAGE_MAP[sourceLanguage] || null;
     if (record.title) titleInput.value = String(record.title).slice(0, 100);
     if (record.description) descriptionInput.value = String(record.description).slice(0, 5000);
     if (Array.isArray(record.tags) && record.tags.length) seoTopic.value = record.tags.join(', ');
@@ -549,6 +601,8 @@ fileInput.addEventListener('change', () => {
   if (!loadingHandoff) {
     sourceCaptions = '';
     sourceLanguage = '';
+    sourceSubtitleSrt = '';
+    sourceCaptionLanguage = null;
     seoContentConsent.checked = true;
     $('#handoffHint').hidden = true;
   }
@@ -709,9 +763,20 @@ $('#uploadForm').addEventListener('submit', async (event) => {
     accessToken = await refreshAccessToken();
     const uploaded = await uploadVideo(selectedFile, metadata, accessToken);
     progressFill.style.width = '100%';
-    setStatus('Unggahan selesai. Video mungkin masih diproses sebelum dapat diputar.');
     successLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(uploaded.id)}`;
     successLink.hidden = false;
+    if (sourceSubtitleSrt.trim() && sourceCaptionLanguage) {
+      setStatus('Video berhasil diunggah. Sedang mengirim track subtitle bertiming ke YouTube…');
+      try {
+        await uploadCaptionTrack(uploaded.id, sourceSubtitleSrt, sourceCaptionLanguage, accessToken);
+        setStatus('Video dan track subtitle berhasil diunggah. Video mungkin masih diproses sebelum dapat diputar.');
+      } catch (captionError) {
+        if (captionError.status === 401) setDisconnected('Video sudah terunggah, tetapi sesi YouTube kedaluwarsa sebelum track subtitle terkirim. Hubungkan akun kembali.');
+        setStatus(`Video berhasil diunggah, tetapi track subtitle gagal dikirim: ${captionError.message}`, true);
+      }
+    } else {
+      setStatus('Unggahan selesai. Track subtitle terpisah tidak dikirim karena file SRT bertiming atau bahasa terjemah tidak tersedia.');
+    }
   } catch (error) {
     if (error.status === 401 || error.reconnect) {
       setDisconnected(error.message || 'Hubungkan kembali akun sebelum mengunggah.');

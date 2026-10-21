@@ -23,6 +23,7 @@ export async function saveYoutubeHandoff(blob, details = {}) {
         blob,
         name: String(details.name || 'videoteks-subtitle.mp4').slice(0, 180),
         captions: String(details.captions || '').slice(0, 50000),
+        subtitleSrt: String(details.subtitleSrt || ''),
         language: String(details.language || '').slice(0, 80),
         title: String(details.title || '').slice(0, 100),
         description: String(details.description || '').slice(0, 5000),

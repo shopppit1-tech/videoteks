@@ -20,6 +20,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FIREBASE_PROJECT_ID = 'videoteks-a82c1';
 const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || 'https://shopppit1-tech.github.io';
+const YOUTUBE_REQUIRED_SCOPES = [
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.force-ssl'
+];
 let firebaseAdminAuth = null;
 let firebaseDb = null;
 let autoUploadMediaPipeline = null;
@@ -1398,6 +1402,22 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
  */
 /* legacy block removed */
 
+app.get('/api/youtube/status', requireFirebaseUser, async (req, res) => {
+  const config = youtubeOAuthConfig();
+  try {
+    const snapshot = await youtubeIntegrationRef(req.firebaseUser.uid).get();
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      configured: Boolean(config),
+      connected: Boolean(snapshot.data()?.refreshTokenEncrypted),
+      clientId: config?.clientId || null
+    });
+  } catch (error) {
+    console.error('[youtube] gagal membaca status koneksi:', error.message);
+    res.status(500).json({ error: 'Status koneksi YouTube gagal dimuat.' });
+  }
+});
+
 app.post('/api/youtube/connect', requireFirebaseUser, async (req, res) => {
   const config = youtubeOAuthConfig();
   if (!config) return res.status(503).json({ error: 'Integrasi YouTube belum dikonfigurasi di server.' });
@@ -1418,9 +1438,10 @@ app.post('/api/youtube/connect', requireFirebaseUser, async (req, res) => {
       redirect_uri: YOUTUBE_REDIRECT_URI,
       grant_type: 'authorization_code'
     });
-    const grantedScopes = String(tokens.scope || '').split(/\s+/);
-    if (!tokens.access_token || (tokens.scope && !grantedScopes.includes('https://www.googleapis.com/auth/youtube.upload'))) {
-      return res.status(403).json({ error: 'Google tidak memberikan izin unggah YouTube yang diperlukan.' });
+    const grantedScopes = String(tokens.scope || '').split(/\s+/).filter(Boolean);
+    const missingScopes = YOUTUBE_REQUIRED_SCOPES.filter((scope) => !grantedScopes.includes(scope));
+    if (!tokens.access_token || missingScopes.length) {
+      return res.status(403).json({ error: 'Google belum memberikan izin upload video dan pengelolaan track subtitle. Setujui semua izin YouTube yang diminta, lalu coba sambungkan lagi.' });
     }
     const ref = youtubeIntegrationRef(req.firebaseUser.uid);
     const existing = await ref.get();
@@ -1454,8 +1475,16 @@ app.get('/api/youtube/access-token', requireFirebaseUser, async (req, res) => {
   const ref = youtubeIntegrationRef(req.firebaseUser.uid);
   try {
     const snapshot = await ref.get();
-    const encryptedToken = snapshot.data()?.refreshTokenEncrypted;
+    const integration = snapshot.data() || {};
+    const encryptedToken = integration.refreshTokenEncrypted;
     if (!encryptedToken) return res.status(404).json({ error: 'Akun YouTube belum terhubung.', reconnect: true });
+    const storedScopes = Array.isArray(integration.scopes) ? integration.scopes : [];
+    if (YOUTUBE_REQUIRED_SCOPES.some((scope) => !storedScopes.includes(scope))) {
+      return res.status(403).json({
+        error: 'Izin akun YouTube belum mencakup pengiriman track subtitle. Hubungkan akun kembali dan setujui izin YouTube yang diminta.',
+        reconnect: true
+      });
+    }
     const refreshToken = decryptYoutubeRefreshToken(encryptedToken, config.encryptionKey);
     const tokens = await youtubeTokenRequest({
       client_id: config.clientId,

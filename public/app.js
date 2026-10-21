@@ -34,6 +34,17 @@ const previewFontStacks = {
   'DejaVu Sans Mono': '"Courier New", Courier, monospace',
   'Liberation Sans': 'Arial, Helvetica, sans-serif'
 };
+function srtTimestamp(seconds) {
+  const ms = Math.max(0, Math.round(Number(seconds) * 1000));
+  const hours = Math.floor(ms / 3600000);
+  const minutes = Math.floor((ms % 3600000) / 60000);
+  const wholeSeconds = Math.floor((ms % 60000) / 1000);
+  const millis = ms % 1000;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(wholeSeconds).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+}
+function segmentsToSrt(segments) {
+  return segments.map((segment, index) => `${index + 1}\n${srtTimestamp(segment.start)} --> ${srtTimestamp(segment.end)}\n${String(segment.text || '').trim()}\n`).join('\n');
+}
 const $ = (s) => document.querySelector(s);
 const video = $('#video');
 const fileInput = $('#fileInput');
@@ -325,6 +336,7 @@ $('#exportBtn').onclick = async () => {
       await saveYoutubeHandoff(blob, {
         name: 'videoteks-subtitle.mp4',
         captions: state.segments.map((segment) => segment.text).join('\n'),
+        subtitleSrt: segmentsToSrt(state.segments),
         language: state.translationTarget,
         title: generatedMetadata?.title,
         description: generatedMetadata?.description,
