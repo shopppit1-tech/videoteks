@@ -3,7 +3,15 @@ name: Daily YouTube upload from Drive
 on:
   schedule:
     - cron: '0 11 * * *'
+    - cron: '17 11 * * *'
+    - cron: '47 11 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force an additional public upload today.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +36,6 @@ jobs:
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=videoteks-youtube-daily-upload" | jq -er '.value')"
           curl --fail --silent --show-error --max-time 3300 \
             -X POST "$API_URL" \
-            -H "Authorization: Bearer ${OIDC_TOKEN}" \
-            -H 'Content-Type: application/json' \
-            --data '{"force": ${{ github.event_name == 'workflow_dispatch' }}}'
+          -H "Authorization: Bearer ${OIDC_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          --data '{"force": ${{ github.event_name == 'workflow_dispatch' && inputs.force == true }}}'
