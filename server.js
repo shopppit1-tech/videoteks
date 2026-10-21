@@ -775,7 +775,7 @@ function subtitleStyle(settings) {
   const allowedFonts = new Set(['DejaVu Sans', 'DejaVu Serif', 'DejaVu Sans Mono', 'Liberation Sans']);
   const font = allowedFonts.has(settings.fontFamily) ? settings.fontFamily : 'DejaVu Sans';
   const color = assColor(settings.color === 'gradient' ? '#8b5cf6' : (settings.color || '#ec4899'));
-  const size = Math.min(60, Math.max(8, Number(settings.fontSize) || 8));
+  const size = Math.min(33, Math.max(8, Number(settings.fontSize) || 8));
   const align = settings.position === 'top' ? 6 : settings.position === 'middle' ? 10 : 2;
   const margin = settings.position === 'top' ? 36 : settings.position === 'middle' ? 20 : 42;
   const templates = {
