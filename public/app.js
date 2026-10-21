@@ -27,7 +27,7 @@ document.addEventListener('touchmove', (event) => {
   touchStartY = touch.clientY;
 }, { passive: false });
 
-const state = { file: null, segments: [], translationTarget: '', color: '#ec4899', template: 'pill', fontSize: 8, position: 'bottom', fontFamily: 'DejaVu Sans', outputFormat: 'source' };
+const state = { file: null, segments: [], translationTarget: '', color: '#ec4899', template: 'pill', fontSize: 24, position: 'bottom', fontFamily: 'DejaVu Sans', outputFormat: 'source' };
 const previewFontStacks = {
   'DejaVu Sans': 'system-ui, -apple-system, "Segoe UI", sans-serif',
   'DejaVu Serif': 'Georgia, "Times New Roman", serif',
