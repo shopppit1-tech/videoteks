@@ -102,13 +102,30 @@ export function createAutoUploadMediaPipeline(dependencies) {
   async function synthesizeNarration(text, outputPath) {
     const apiKey = String(process.env.GEMINI_TTS_API_KEY || '').trim();
     if (!apiKey) throw new Error('GEMINI_TTS_API_KEY belum diatur di server.');
-    const data = await geminiRequest(process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts', {
-      contents: [{ role: 'user', parts: [{ text, speech_metadata: { style: AUTO_STYLE } }] }],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { voice: AUTO_VOICE } }
+    const models = [...new Set([
+      process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
+      process.env.GEMINI_TTS_FALLBACK_MODEL || 'gemini-2.5-flash-preview-tts'
+    ])];
+    let data = null;
+    let lastError = null;
+    for (const ttsModel of models) {
+      try {
+        data = await geminiRequest(ttsModel, {
+          contents: [{ role: 'user', parts: [{ text, speech_metadata: { style: AUTO_STYLE } }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { voice: AUTO_VOICE } }
+          }
+        }, apiKey, 120000, 4);
+        break;
+      } catch (error) {
+        lastError = error;
+        const fallbackEligible = isGeminiRetryableError(error.status, error.message) || /model.*(not found|does not exist)|not found/i.test(error.message || '');
+        if (!fallbackEligible) throw error;
+        console.warn(`[youtube-auto-upload] TTS model ${ttsModel} unavailable; trying fallback:`, error.message || error.name);
       }
-    }, apiKey, 120000, 4);
+    }
+    if (!data) throw lastError || new Error('Gemini TTS tidak tersedia.');
     const audioData = data?.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data)?.inlineData?.data;
     if (!audioData) throw new Error('Gemini tidak mengembalikan audio narasi.');
     await fs.writeFile(outputPath, Buffer.from(audioData, 'base64'));
