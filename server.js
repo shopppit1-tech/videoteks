@@ -1737,7 +1737,7 @@ app.get('/api/internal/youtube-auto-upload/status', async (req, res) => {
     const data = job.data() || {};
     return { id: job.id, processing: Boolean(data.processing), status: data.status || 'off', runStartedAt: Number(data.autoUploadRunStartedAt || 0), lastError: data.lastError || '', lastVideoId: data.lastVideoId || null };
   }).filter((item) => !since || item.runStartedAt >= since);
-  const done = items.length >= expected && items.every((item) => !item.processing && ['uploaded', 'empty', 'error', 'already_uploaded', 'disabled'].includes(item.status));
+  const done = items.length >= expected && items.every((item) => item.status === 'error' || (!item.processing && ['uploaded', 'empty', 'already_uploaded', 'disabled'].includes(item.status)));
   const hasErrors = items.some((item) => item.status === 'error');
   res.set('Cache-Control', 'no-store').json({ ok: !hasErrors, done, hasErrors, items });
 });
