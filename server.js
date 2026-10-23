@@ -807,7 +807,7 @@ async function generateYoutubeMetadataFromCaptions(captions, language = '') {
   if (!keys.length) return null;
   for (const apiKey of keys) {
     try {
-      const result = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35, responseMimeType: 'application/json', maxOutputTokens: 900 } }, apiKey, 60000, 1);
+      const result = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35, responseMimeType: 'application/json', maxOutputTokens: 900 } }, apiKey, 60000, 3);
       rotateGeminiKeyAfter(apiKey);
       const metadata = parseSeoMetadata(responseText(result));
       const title = String(metadata?.title || '').trim().slice(0, 100);

@@ -42,7 +42,9 @@ export function createAutoUploadMediaPipeline(dependencies) {
     let lastError = null;
     for (const apiKey of keys) {
       try {
-        const result = await geminiRequest(requestModel, body, apiKey, timeoutMs, 1);
+        // Transient Gemini overloads must not abort the whole YouTube job.
+        // geminiRequest retries the same key with backoff before we rotate keys.
+        const result = await geminiRequest(requestModel, body, apiKey, timeoutMs, 3);
         rotateGeminiKeyAfter(apiKey);
         return { result, apiKey };
       } catch (error) {
@@ -106,7 +108,7 @@ export function createAutoUploadMediaPipeline(dependencies) {
         responseModalities: ['AUDIO'],
         speechConfig: { voiceConfig: { voice: AUTO_VOICE } }
       }
-    }, apiKey, 120000, 1);
+    }, apiKey, 120000, 4);
     const audioData = data?.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data)?.inlineData?.data;
     if (!audioData) throw new Error('Gemini tidak mengembalikan audio narasi.');
     await fs.writeFile(outputPath, Buffer.from(audioData, 'base64'));
@@ -160,7 +162,7 @@ export function createAutoUploadMediaPipeline(dependencies) {
           const result = await geminiRequest(model, {
             contents: [{ parts: [{ text: prompt }, audioPart] }],
             generationConfig: { responseMimeType: 'application/json' }
-          }, apiKey, 120000, 1);
+          }, apiKey, 120000, 3);
           rotateGeminiKeyAfter(apiKey);
           const parsed = jsonPart(responseText(result));
           const segments = (Array.isArray(parsed?.segments) ? parsed.segments : [])
