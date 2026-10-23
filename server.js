@@ -467,7 +467,7 @@ function jakartaDate(date = new Date()) {
   return `${fields.year}-${fields.month}-${fields.day}`;
 }
 
-async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
+async function processOneAutoUpload(jobSnapshot, { force = false, runStartedAt = Date.now() } = {}) {
   const uid = jobSnapshot.id;
   const jobRef = youtubeAutoUploadJobRef(uid);
   const today = jakartaDate();
@@ -480,7 +480,7 @@ async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
     if (current.pipelineVersion !== AUTO_UPLOAD_PIPELINE_VERSION) return { status: 'needs_confirmation' };
     if (current.lastUploadDate === today && !force) return { status: 'already_uploaded' };
     if (Number(current.processingUntil || 0) > now) return { status: 'busy' };
-    transaction.set(jobRef, { processing: true, processingStartedAt: now, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
+    transaction.set(jobRef, { processing: true, processingStartedAt: now, autoUploadRunStartedAt: runStartedAt, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
     return { status: 'claimed', settings: current };
   });
   if (claim.status !== 'claimed') return { status: claim.status };
@@ -1701,20 +1701,45 @@ app.post('/api/internal/youtube-auto-upload/run', async (req, res) => {
   if (!firebaseDb) return res.status(503).json({ error: 'Firestore belum dikonfigurasi untuk antrean otomatis.' });
   try {
     const force = req.body?.force === true;
+    const runStartedAt = Date.now();
     const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
-    const results = [];
-    for (const job of jobs.docs) results.push(await processOneAutoUpload(job, { force }));
-    const summary = results.reduce((counts, result) => {
-      counts[result.status] = (counts[result.status] || 0) + 1;
-      return counts;
-    }, {});
-    console.info('[youtube-auto-upload] daily run:', JSON.stringify(summary));
-    const hasErrors = Number(summary.error || 0) > 0;
-    res.set('Cache-Control', 'no-store').status(hasErrors ? 502 : 200).json({ ok: !hasErrors, summary });
+    // Render may terminate a request after roughly 15 minutes while media is processed.
+    // Start the bounded Firestore jobs in the background and let Actions poll status.
+    void (async () => {
+      const results = [];
+      for (const job of jobs.docs) results.push(await processOneAutoUpload(job, { force, runStartedAt }));
+      const summary = results.reduce((counts, result) => {
+        counts[result.status] = (counts[result.status] || 0) + 1;
+        return counts;
+      }, {});
+      console.info('[youtube-auto-upload] daily run:', JSON.stringify(summary));
+    })().catch((error) => console.error('[youtube-auto-upload] background run failed:', error.message || error.name));
+    res.set('Cache-Control', 'no-store').status(202).json({ ok: true, accepted: true, runStartedAt, jobCount: jobs.size });
   } catch (error) {
     console.error('[youtube-auto-upload] daily run failed:', error.message || error.name);
     res.status(500).json({ error: 'Pemrosesan antrean YouTube harian gagal.' });
   }
+});
+
+app.get('/api/internal/youtube-auto-upload/status', async (req, res) => {
+  try {
+    const token = /^Bearer\s+(.+)$/i.exec(req.get('authorization') || '')?.[1];
+    if (!token) return res.status(401).json({ error: 'Workflow otomatis tidak terautentikasi.' });
+    await verifyGithubActionsOidcToken(token);
+  } catch (error) {
+    return res.status(401).json({ error: error.message || 'Workflow otomatis tidak terautentikasi.' });
+  }
+  if (!firebaseDb) return res.status(503).json({ error: 'Firestore belum dikonfigurasi untuk antrean otomatis.' });
+  const since = Number(req.query.since || 0);
+  const expected = Math.max(0, Number(req.query.expected || 0));
+  const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
+  const items = jobs.docs.map((job) => {
+    const data = job.data() || {};
+    return { id: job.id, processing: Boolean(data.processing), status: data.status || 'off', runStartedAt: Number(data.autoUploadRunStartedAt || 0), lastError: data.lastError || '', lastVideoId: data.lastVideoId || null };
+  }).filter((item) => !since || item.runStartedAt >= since);
+  const done = items.length >= expected && items.every((item) => !item.processing && ['uploaded', 'empty', 'error', 'already_uploaded', 'disabled'].includes(item.status));
+  const hasErrors = items.some((item) => item.status === 'error');
+  res.set('Cache-Control', 'no-store').json({ ok: !hasErrors, done, hasErrors, items });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(process.cwd(), 'public', 'index.html')));

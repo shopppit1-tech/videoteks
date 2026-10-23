@@ -36,4 +36,22 @@ jobs:
             -X POST "$API_URL" \
           -H "Authorization: Bearer ${OIDC_TOKEN}" \
           -H 'Content-Type: application/json' \
-          --data '{"force": ${{ github.event_name == 'workflow_dispatch' && inputs.force == true }}}'
+          --data '{"force": ${{ github.event_name == 'workflow_dispatch' && inputs.force == true }}}' > run.json
+          RUN_STARTED_AT="$(jq -er '.runStartedAt' run.json)"
+          JOB_COUNT="$(jq -er '.jobCount' run.json)"
+          STATUS_URL="${API_URL%/run}/status?since=${RUN_STARTED_AT}&expected=${JOB_COUNT}"
+          for attempt in $(seq 1 180); do
+            STATUS="$(curl --fail --silent --show-error --max-time 30 \
+              -H "Authorization: Bearer ${OIDC_TOKEN}" "$STATUS_URL")"
+            echo "$STATUS"
+            if jq -e '.done == true' >/dev/null <<<"$STATUS"; then
+              if jq -e '.hasErrors == true' >/dev/null <<<"$STATUS"; then
+                echo 'VideoTeks upload worker reported an error.' >&2
+                exit 1
+              fi
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for the VideoTeks upload worker.' >&2
+          exit 1
