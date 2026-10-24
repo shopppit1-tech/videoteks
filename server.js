@@ -478,7 +478,10 @@ async function processOneAutoUpload(jobSnapshot, { force = false, runStartedAt =
     const current = snapshot.data() || {};
     if (!snapshot.exists || !current.enabled) return { status: 'disabled' };
     if (current.pipelineVersion !== AUTO_UPLOAD_PIPELINE_VERSION) return { status: 'needs_confirmation' };
-    if (current.lastUploadDate === today && !force) return { status: 'already_uploaded' };
+    if (current.lastUploadDate === today && !force) {
+      transaction.set(jobRef, { autoUploadRunStartedAt: runStartedAt, updatedAt: now }, { merge: true });
+      return { status: 'already_uploaded' };
+    }
     if (Number(current.processingUntil || 0) > now) return { status: 'busy' };
     transaction.set(jobRef, { processing: true, processingStartedAt: now, autoUploadRunStartedAt: runStartedAt, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
     return { status: 'claimed', settings: current };
@@ -1733,10 +1736,13 @@ app.get('/api/internal/youtube-auto-upload/status', async (req, res) => {
   const since = Number(req.query.since || 0);
   const expected = Math.max(0, Number(req.query.expected || 0));
   const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
-  const items = jobs.docs.map((job) => {
+  const today = jakartaDate();
+  const items = jobs.docs.flatMap((job) => {
     const data = job.data() || {};
-    return { id: job.id, processing: Boolean(data.processing), status: data.status || 'off', runStartedAt: Number(data.autoUploadRunStartedAt || 0), lastError: data.lastError || '', lastVideoId: data.lastVideoId || null };
-  }).filter((item) => !since || item.runStartedAt >= since);
+    const item = { id: job.id, processing: Boolean(data.processing), status: data.status || 'off', runStartedAt: Number(data.autoUploadRunStartedAt || 0), lastError: data.lastError || '', lastVideoId: data.lastVideoId || null };
+    const alreadyUploadedToday = item.status === 'uploaded' && data.lastUploadDate === today && !item.processing;
+    return !since || item.runStartedAt >= since || alreadyUploadedToday ? [item] : [];
+  });
   const done = items.length >= expected && items.every((item) => item.status === 'error' || (!item.processing && ['uploaded', 'empty', 'already_uploaded', 'disabled'].includes(item.status)));
   const hasErrors = items.some((item) => item.status === 'error');
   res.set('Cache-Control', 'no-store').json({ ok: !hasErrors, done, hasErrors, items });
