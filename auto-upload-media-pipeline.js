@@ -233,16 +233,37 @@ export function createAutoUploadMediaPipeline(dependencies) {
     const cleanupPaths = [voiceAudioPath, audioReplacedPath, subtitlePath, finalVideoPath];
     try {
       await onStage('analyzing');
-      const narrationResult = await createNarrationFromVideo(videoPath);
+      let narrationResult;
+      try {
+        narrationResult = await createNarrationFromVideo(videoPath);
+      } catch (error) {
+        console.warn('[youtube-auto-upload] AI metadata unavailable; using upload fallback:', error.message || error.name);
+        narrationResult = { narration: '', metadata: { title: 'Video baru', description: 'Video diunggah otomatis oleh VideoTeks.', tags: ['videoteks'] } };
+      }
       const narration = narrationResult.narration;
-      await onStage('voice');
-      await synthesizeNarration(narration, voiceAudioPath);
-      await onStage('replacing-audio');
-      const durationResult = await replaceVideoAudio(videoPath, voiceAudioPath, audioReplacedPath);
-      await onStage('transcribing-subtitles');
-      const segments = await transcribeForSubtitles(audioReplacedPath);
-      await onStage('rendering-subtitles');
-      await renderSubtitles(audioReplacedPath, segments, subtitlePath, finalVideoPath);
+      let durationResult = {};
+      let mediaPath = videoPath;
+      if (narration) {
+        try {
+          await onStage('voice');
+          await synthesizeNarration(narration, voiceAudioPath);
+          await onStage('replacing-audio');
+          durationResult = await replaceVideoAudio(videoPath, voiceAudioPath, audioReplacedPath);
+          mediaPath = audioReplacedPath;
+        } catch (error) {
+          console.warn('[youtube-auto-upload] AI voice unavailable; keeping original video audio:', error.message || error.name);
+        }
+      }
+      let segments = [];
+      try {
+        await onStage('transcribing-subtitles');
+        segments = await transcribeForSubtitles(mediaPath);
+        await onStage('rendering-subtitles');
+        await renderSubtitles(mediaPath, segments, subtitlePath, finalVideoPath);
+      } catch (error) {
+        console.warn('[youtube-auto-upload] subtitles unavailable; uploading video without generated subtitles:', error.message || error.name);
+        await fs.copyFile(mediaPath, finalVideoPath);
+      }
       return { finalVideoPath, cleanupPaths, narration, metadata: narrationResult.metadata, segmentCount: segments.length, ...durationResult };
     } catch (error) {
       await cleanup(...cleanupPaths);
