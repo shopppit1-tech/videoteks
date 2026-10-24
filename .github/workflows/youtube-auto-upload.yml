@@ -2,7 +2,7 @@ name: Daily YouTube upload from Drive
 
 on:
   schedule:
-    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 11 * * *'
+    - cron: '3,8,13,18,23,28,33,38,43,48,53,58 11 * * *'
   workflow_dispatch:
     inputs:
       force:
