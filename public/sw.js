@@ -19,6 +19,7 @@ const SHELL_FILES = [
   'images/hero-studio-phone.webp',
   'app.html',
   'app.js',
+  'local-ai.worker.js',
   'audio.html',
   'audio.js',
   'voice.html',
