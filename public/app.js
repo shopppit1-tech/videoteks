@@ -263,16 +263,10 @@ async function transcribeCurrentFile() {
     const result = await runLocalAi('transcribe', { file: selectedFile }, { signal: controller.signal, onProgress: showLocalProgress });
     if (state.file !== selectedFile || transcribeController !== controller) return;
     state.segments = result.segments || [];
-    caption.value = state.segments[0]?.text || '';
-    syncCaption(); drawSegments();
     const target = $('#translationTarget').value || 'id';
     state.translationTarget = target;
     let translationNotice = '';
     if (state.segments.length) {
-      setStatus(`${state.segments.length} segmen transkripsi siap. Terjemahan lokal sedang disiapkan; teks asli sudah tersedia untuk diedit.`);
-      setBusy(false);
-      const translateButton = $('#translateBtn');
-      translateButton.disabled = true;
       try {
         const translated = await runLocalAi('translate', {
           segments: state.segments,
@@ -283,16 +277,14 @@ async function transcribeCurrentFile() {
         state.segments = translated.segments;
         sourceLanguageSelect.value = translated.targetLanguage;
         sourceLanguageManual = false;
-        caption.value = state.segments[0]?.text || '';
-        syncCaption(); drawSegments();
         translationNotice = ` Diterjemahkan otomatis ke ${$('#translationTarget').selectedOptions[0]?.textContent || target}.`;
       } catch (translationError) {
         if (translationError.name === 'AbortError') throw translationError;
         translationNotice = ` Transkripsi siap, tetapi terjemahan otomatis belum berhasil: ${translationError.message} Pilih bahasa ucapan secara manual lalu tekan Terjemahkan.`;
-      } finally {
-        if (transcribeController === controller) translateButton.disabled = false;
       }
     }
+    caption.value = state.segments[0]?.text || '';
+    syncCaption(); drawSegments();
     setStatus(`${state.segments.length} segmen siap diedit.${translationNotice} Semua pemrosesan berlangsung lokal; video dan teks tidak dikirim ke AI API atau riwayat cloud.`);
     queueYoutubeHandoff(selectedFile, {
       name: selectedFile.name || 'video-subtitle.mp4',
