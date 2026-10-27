@@ -61,7 +61,6 @@ let generatedMetadata = null;
 let localAiWorker = null;
 let localTaskId = 0;
 const pendingLocalTasks = new Map();
-let youtubeHandoffQueue = Promise.resolve();
 
 function getLocalAiWorker() {
   if (localAiWorker) return localAiWorker;
@@ -108,19 +107,6 @@ function runLocalAi(type, payload, { signal, onProgress } = {}) {
     pendingLocalTasks.set(id, { resolve, reject, onProgress, cleanup });
     signal?.addEventListener('abort', onAbort, { once: true });
     worker.postMessage({ id, type, payload });
-  });
-}
-
-function queueYoutubeHandoff(file, details, onError) {
-  const link = $('#youtubeHandoffLink');
-  link.hidden = true;
-  if (!file) return;
-  youtubeHandoffQueue = youtubeHandoffQueue.catch(() => {}).then(() => saveYoutubeHandoff(file, details));
-  const savePromise = youtubeHandoffQueue;
-  void savePromise.then(() => {
-    if (state.file === file) link.hidden = false;
-  }).catch((error) => {
-    if (state.file === file) onError?.(error);
   });
 }
 
@@ -286,13 +272,19 @@ async function transcribeCurrentFile() {
     caption.value = state.segments[0]?.text || '';
     syncCaption(); drawSegments();
     setStatus(`${state.segments.length} segmen siap diedit.${translationNotice} Semua pemrosesan berlangsung lokal; video dan teks tidak dikirim ke AI API atau riwayat cloud.`);
-    queueYoutubeHandoff(selectedFile, {
-      name: selectedFile.name || 'video-subtitle.mp4',
-      captions: state.segments.map((segment) => segment.text).join('\n'),
-      title: generatedMetadata?.title,
-      description: generatedMetadata?.description,
-      tags: generatedMetadata?.tags
-    }, (handoffError) => setStatus(`Subtitle siap, tetapi video belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true));
+    try {
+      await saveYoutubeHandoff(selectedFile, {
+        name: selectedFile.name || 'video-subtitle.mp4',
+        captions: state.segments.map((segment) => segment.text).join('\n'),
+        title: generatedMetadata?.title,
+        description: generatedMetadata?.description,
+        tags: generatedMetadata?.tags
+      });
+      $('#youtubeHandoffLink').hidden = false;
+    } catch (handoffError) {
+      $('#youtubeHandoffLink').hidden = true;
+      setStatus(`Subtitle siap, tetapi belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
+    }
   } catch (error) {
     if (error.name !== 'AbortError' && state.file === selectedFile) setStatus(`${error.message} Video dan teks tetap diproses tanpa API AI.`, true);
   } finally {
@@ -324,19 +316,22 @@ $('#translateBtn').onclick = async () => {
     drawSegments();
     syncCaption();
     scheduleHistorySave();
-    const sourceLabel = sourceLanguage === 'auto' ? `Bahasa sumber terdeteksi: ${result.sourceLanguage}. ` : '';
-    setStatus(`${sourceLabel}Terjemahan ${targetLabel} siap. Model berjalan lokal; hasil tidak dikirim ke AI API atau riwayat cloud.`);
-    if (state.file) {
-      queueYoutubeHandoff(state.file, {
+    try {
+      if (!state.file) throw new Error('Video sumber tidak tersedia.');
+      await saveYoutubeHandoff(state.file, {
         name: state.file.name || 'video-terjemahan.mp4',
         captions: state.segments.map((segment) => segment.text).join('\n'),
         language: targetLabel,
         title: generatedMetadata?.title,
         description: generatedMetadata?.description,
         tags: generatedMetadata?.tags
-      }, (handoffError) => setStatus(`Terjemahan ${targetLabel} siap, tetapi video belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true));
-    } else {
+      });
+      $('#youtubeHandoffLink').hidden = false;
+      const sourceLabel = sourceLanguage === 'auto' ? `Bahasa sumber terdeteksi: ${result.sourceLanguage}. ` : '';
+      setStatus(`${sourceLabel}Terjemahan ${targetLabel} siap. Model berjalan lokal; hasil tidak dikirim ke AI API atau riwayat cloud.`);
+    } catch (handoffError) {
       $('#youtubeHandoffLink').hidden = true;
+      setStatus(`Terjemahan ${targetLabel} siap, tetapi video belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
     }
   } catch (error) {
     setStatus(error.message || 'Terjemahan gagal dibuat.', true);
