@@ -4,23 +4,23 @@ MVP aplikasi untuk membuat subtitle dari suara asli video, menerjemahkannya, mem
 
 ## Fitur
 
-- Halaman Subtitle Video mengekstrak audio dan mentranskripsikannya di browser dengan Whisper lokal; tidak mengirim audio/video ke API AI.
-- Terjemahan per segmen dijalankan di browser dengan M2M100 lokal, tanpa API AI. Bahasa sumber dideteksi lokal dan dapat dipilih manual.
-- Runtime pemrosesan dan bobot model diunduh dari host statis pada penggunaan awal; unduhan model bisa besar. Browser memerlukan internet untuk mengambil file itu, tetapi video/audio/teks tetap di perangkat selama transkripsi dan terjemahan.
+- Upload video dan ekstraksi audio dengan FFmpeg.
+- Transkripsi audio bertimestamp memakai Gemini Files API + generateContent.
+- Terjemahan subtitle memakai Gemini.
 - Editor segmen subtitle dan preview.
 - Ekspor MP4 dengan subtitle tertanam dan audio asli tetap ada.
 - Template warna subtitle: merah, jingga, kuning, hijau, biru, ungu, pink, hitam, putih, gradient.
-- Google Sign-In sebelum membuka fitur. Hasil lokal Subtitle Video tidak dikirim ke riwayat cloud; fitur riwayat lain tetap memakai Firebase.
+- Google Sign-In sebelum membuka fitur, serta riwayat transkripsi per akun yang dapat dihapus.
 - Koneksi YouTube tersimpan per akun VideoTeks dan dipulihkan otomatis saat halaman dibuka kembali.
 
 ## Menjalankan
 
-Prasyarat: Node.js 18+, FFmpeg, serta Firebase project dengan Google Authentication dan Firestore. Gemini API key hanya diperlukan untuk fitur backend lain yang masih memakai Gemini; transkripsi dan terjemahan di halaman Subtitle Video tidak menggunakannya.
+Prasyarat: Node.js 18+, FFmpeg, Gemini API key, serta Firebase project dengan Google Authentication dan Firestore.
 
 ```bash
 npm install
 cp .env.example .env
-# isi GEMINI_API_KEY hanya jika memakai fitur backend lain yang masih memanggil Gemini
+# isi GEMINI_API_KEY di .env untuk Subtitle Video
 # isi GEMINI_TTS_API_KEY di .env untuk halaman Suara AI (opsional)
 # isi FIREBASE_SERVICE_ACCOUNT_JSON menggunakan kredensial server Firebase (wajib untuk login/riwayat)
 # isi kredensial OAuth YouTube dan kunci enkripsi token di bawah ini
@@ -29,7 +29,7 @@ npm start
 
 Buka `http://localhost:3000`. Firebase Web app di frontend menggunakan project ID `videoteks-a82c1`; tambahkan domain yang dipakai (misalnya `localhost` dan domain Render) pada **Authentication → Settings → Authorized domains**, lalu aktifkan **Authentication → Sign-in method → Google**.
 
-Untuk fitur riwayat yang masih memakai cloud, buat Firestore Database. Backend menyimpan dokumen di `users/{uid}/history/{historyId}` sehingga endpoint menggunakan UID sesi yang tokennya diverifikasi server. Di Render, buat service account Firebase dengan akses Firestore yang diperlukan dan isi environment variable `FIREBASE_SERVICE_ACCOUNT_JSON` dengan **seluruh JSON service-account**. Jangan commit service-account atau memasukkan private key ke frontend/chat. Jangan membuat Firestore rules `allow read, write: if true`; akses aplikasi dilakukan melalui server Admin SDK dan tiap operasi membatasi koleksi ke UID token yang diverifikasi. Transkripsi/terjemahan lokal pada halaman Subtitle Video tidak disimpan ke Firestore.
+Untuk riwayat, buat Firestore Database. Backend menyimpan dokumen di `users/{uid}/history/{historyId}` sehingga endpoint menggunakan UID sesi yang tokennya diverifikasi server. Di Render, buat service account Firebase dengan akses Firestore yang diperlukan dan isi environment variable `FIREBASE_SERVICE_ACCOUNT_JSON` dengan **seluruh JSON service-account**. Jangan commit service-account atau memasukkan private key ke frontend/chat. Jangan membuat Firestore rules `allow read, write: if true`; akses aplikasi dilakukan melalui server Admin SDK dan tiap operasi membatasi koleksi ke UID token yang diverifikasi. File video tidak disimpan; hanya teks, segmen subtitle, dan pengaturan.
 
 API key hanya dibaca server dari `.env`; jangan commit file `.env`. Untuk halaman Suara AI, gunakan nama terpisah `GEMINI_TTS_API_KEY` agar tidak bentrok dengan `GEMINI_API_KEY`. Model default-nya adalah Gemini 3 TTS `gemini-3.8-flash-tts`; model dapat diganti dengan `GEMINI_TTS_MODEL`.
 
@@ -43,9 +43,9 @@ Gunakan pasangan Client ID dan Client Secret dari OAuth Web Client yang sama.
 
 Atur `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_TOKEN_ENCRYPTION_KEY`, serta `YOUTUBE_REDIRECT_URI=https://shopppit1-tech.github.io` pada server. Nilainya harus sama persis dengan origin frontend yang membuka halaman (bukan URL halaman dengan path). Untuk pengujian lokal, set nilainya ke origin lokal yang sedang dipakai, misalnya `http://localhost:3000`. Buat kunci enkripsi 32-byte dengan `openssl rand -hex 32`; jangan commit atau membagikannya. Server menyimpan refresh token terenkripsi di Firestore per UID VideoTeks, sementara token akses hanya dipakai sementara. Pengguna menyetujui izin unggah YouTube satu kali; koneksi bisa dilepas dari halaman YouTube.
 
-Di halaman **Subtitle Video**, pemilihan video otomatis memulai ekstraksi audio, transkripsi lokal, lalu terjemahan ke Bahasa Indonesia secara lokal. Bahasa sumber dapat dideteksi otomatis atau dipilih manual; pilih bahasa tujuan lain dan tekan **Terjemahkan** untuk membuat terjemahan lokal. Hasil transkripsi/terjemahan tidak disimpan ke riwayat cloud. Tombol **Unduh Video** tetap memakai FFmpeg pada server Render; halaman meminta konfirmasi dan mengunggah video ke server tersebut hanya saat ekspor. Setelah ekspor, tekan **Lanjutkan video ke YouTube**; berkas MP4 dan teks subtitle disimpan sementara di IndexedDB pada browser yang sama.
+Di halaman **Subtitle Video**, pilih bahasa tujuan dan tekan **Terjemahkan** untuk memakai endpoint penerjemahan yang sudah ada. Setelah ekspor MP4 berhasil, tekan **Lanjutkan video ke YouTube**; MP4 dan teks subtitle disimpan sementara di IndexedDB pada browser yang sama, lalu dimuat otomatis pada halaman upload. Video tetap dapat diunduh seperti biasa.
 
-Metadata SEO YouTube hanya memakai Gemini khusus melalui `GEMINI_YOUTUBE_API_KEY` pada Render (`GEMINI_YOUTUBE_KEY` diterima sebagai alias khusus YouTube); tidak ada fallback ke `GEMINI_API_KEY` atau `GEMINI_TTS_API_KEY`. Model SEO menggunakan `GEMINI_YOUTUBE_MODEL`. API key hanya dibaca server. Untuk unggah langsung, setelah pengguna menyetujui analisis, backend mengekstrak audio dan sampai 12 frame sampel; Gemini membuat judul, deskripsi, dan tag berdasarkan isi tersebut, sementara nama file dan topik opsional hanya petunjuk tambahan. Video utuh tidak dikirim ke Gemini. Jika video diteruskan dari Subtitle Video, subtitle/terjemahan digunakan sebagai konteks. Hasil dapat diedit sebelum unggah.
+Metadata SEO YouTube hanya memakai Gemini khusus melalui `GEMINI_YOUTUBE_API_KEY` pada Render (`GEMINI_YOUTUBE_KEY` diterima sebagai alias khusus YouTube); tidak ada fallback ke `GEMINI_API_KEY` transkripsi/terjemahan atau `GEMINI_TTS_API_KEY`. Model SEO menggunakan `GEMINI_YOUTUBE_MODEL`. API key hanya dibaca server. Untuk unggah langsung, setelah pengguna menyetujui analisis, backend mengekstrak audio dan sampai 12 frame sampel; Gemini membuat judul, deskripsi, dan tag berdasarkan isi tersebut, sementara nama file dan topik opsional hanya petunjuk tambahan. Video utuh tidak dikirim ke Gemini. Jika video diteruskan dari Subtitle Video, subtitle/terjemahan digunakan sebagai konteks. Hasil dapat diedit sebelum unggah.
 
 ## Deploy ke Render
 
