@@ -51,10 +51,73 @@ const fileInput = $('#fileInput');
 const preview = $('#subtitlePreview');
 const status = $('#status');
 const caption = $('#caption');
+const sourceLanguageSelect = $('#sourceLanguage');
+let sourceLanguageManual = false;
+sourceLanguageSelect.onchange = () => { sourceLanguageManual = sourceLanguageSelect.value !== 'auto'; };
 let transcribeController = null;
 let currentHistoryId = null;
 let historySaveTimer = null;
 let generatedMetadata = null;
+let localAiWorker = null;
+let localTaskId = 0;
+const pendingLocalTasks = new Map();
+
+function getLocalAiWorker() {
+  if (localAiWorker) return localAiWorker;
+  const worker = new Worker(new URL('./local-ai.worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = (event) => {
+    const message = event.data || {};
+    const task = pendingLocalTasks.get(message.id);
+    if (!task) return;
+    if (message.type === 'progress') {
+      task.onProgress?.(message);
+      return;
+    }
+    pendingLocalTasks.delete(message.id);
+    task.cleanup();
+    if (message.type === 'result') task.resolve(message.result);
+    else task.reject(new Error(message.error || 'Pemrosesan lokal gagal.'));
+  };
+  worker.onerror = (event) => {
+    const error = new Error(event.message || 'Worker lokal tidak dapat dijalankan di browser ini.');
+    for (const task of pendingLocalTasks.values()) {
+      task.cleanup();
+      task.reject(error);
+    }
+    pendingLocalTasks.clear();
+    worker.terminate();
+    if (localAiWorker === worker) localAiWorker = null;
+  };
+  localAiWorker = worker;
+  return worker;
+}
+
+function runLocalAi(type, payload, { signal, onProgress } = {}) {
+  if (signal?.aborted) return Promise.reject(new DOMException('Pemrosesan dibatalkan.', 'AbortError'));
+  const worker = getLocalAiWorker();
+  const id = ++localTaskId;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      pendingLocalTasks.delete(id);
+      worker.terminate();
+      if (localAiWorker === worker) localAiWorker = null;
+      reject(new DOMException('Pemrosesan dibatalkan.', 'AbortError'));
+    };
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    pendingLocalTasks.set(id, { resolve, reject, onProgress, cleanup });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    worker.postMessage({ id, type, payload });
+  });
+}
+
+function showLocalProgress(message) {
+  if (!message?.message) return;
+  setStatus(message.message);
+  const title = $('#busyTitle');
+  const details = $('#busyText');
+  if (title && ['extract', 'asr-model', 'asr', 'translate-model', 'translate'].includes(message.stage)) title.textContent = message.message;
+  if (details && message.progress !== null && Number.isFinite(message.progress)) details.textContent = `${Math.max(0, Math.min(100, message.progress))}%`;
+}
 
 function scheduleHistorySave() {
   if (!currentHistoryId) return;
@@ -79,7 +142,7 @@ function scheduleHistorySave() {
 
 function fmt(s) { return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
 function setStatus(text, error = false) { status.textContent = text; status.className = `status ${error ? 'error' : ''}`; }
-function setBusy(active, text = 'AI sedang mengenali suara...') { const overlay = $('#busyOverlay'); const button = $('#transcribeBtn'); if (overlay) overlay.classList.toggle('show', active); if (button) { button.disabled = active; button.style.opacity = active ? '.65' : '1'; button.textContent = active ? '⏳ Sedang bekerja...' : '↻ Buat Ulang Teks'; } const title = $('#busyTitle'); if (title) title.textContent = text; }
+function setBusy(active, text = 'Memproses di perangkat…') { const overlay = $('#busyOverlay'); const button = $('#transcribeBtn'); if (overlay) overlay.classList.toggle('show', active); if (button) { button.disabled = active; button.style.opacity = active ? '.65' : '1'; button.textContent = active ? '⏳ Sedang bekerja…' : '↻ Buat Ulang Teks'; } const translateButton = $('#translateBtn'); if (translateButton) translateButton.disabled = active; const exportButton = $('#exportBtn'); if (exportButton) exportButton.disabled = active; const title = $('#busyTitle'); if (title) title.textContent = text; }
 function syncCaption() {
   if (state.segments[0]) {
     state.segments[0].text = caption.value;
@@ -137,6 +200,8 @@ $('#clearCaption').onclick = () => { caption.value = ''; syncCaption(); schedule
 fileInput.onchange = (event) => {
   state.file = event.target.files[0];
   if (!state.file) return;
+  if (transcribeController) transcribeController.abort();
+  if (!sourceLanguageManual) sourceLanguageSelect.value = 'auto';
   $('#youtubeHandoffLink').hidden = true;
   currentHistoryId = null;
   clearTimeout(historySaveTimer);
@@ -148,7 +213,7 @@ fileInput.onchange = (event) => {
   video.onloadedmetadata = () => { $('#seek').max = video.duration; $('#duration').textContent = fmt(video.duration); applyPreviewFormat(); };
   $('#empty').style.display = 'none';
   $('#videoWrap').classList.add('has-video');
-  setStatus('Video dipilih. AI mulai mengenali suara secara otomatis...');
+  setStatus('Video dipilih. Model lokal akan memproses suara di perangkat; unduhan model awal memerlukan internet.');
   void transcribeCurrentFile();
 };
 $('#playBtn').onclick = () => video.paused ? video.play() : video.pause();
@@ -173,27 +238,40 @@ $('#outputFormat').onchange = (e) => { state.outputFormat = e.target.value; appl
 async function transcribeCurrentFile() {
   if (!state.file) return setStatus('Pilih video terlebih dahulu.', true);
   if (transcribeController) transcribeController.abort();
+  if (!sourceLanguageManual) sourceLanguageSelect.value = 'auto';
   const controller = new AbortController();
   const selectedFile = state.file;
   transcribeController = controller;
-  const form = new FormData(); form.append('video', selectedFile);
-  setStatus('Mengambil suara dan membuat teks otomatis...'); setBusy(true);
+  currentHistoryId = null;
+  generatedMetadata = null;
+  setStatus('Menyiapkan pemrosesan lokal. File video tidak dikirim ke API AI.'); setBusy(true);
   try {
-    const response = await authenticatedFetch('/api/transcribe', { method: 'POST', body: form, signal: controller.signal });
-    const contentType = response.headers.get('content-type') || '';
-    const data = contentType.includes('application/json')
-      ? await response.json()
-      : { error: response.ok ? 'Server mengembalikan respons yang tidak dikenali.' : `Server sedang memulai ulang atau sibuk (HTTP ${response.status}). Coba lagi.` };
-    if (!response.ok) throw Error(data.error);
+    const result = await runLocalAi('transcribe', { file: selectedFile }, { signal: controller.signal, onProgress: showLocalProgress });
     if (state.file !== selectedFile || transcribeController !== controller) return;
-    currentHistoryId = data.historyId || null;
-    generatedMetadata = data.metadata || null;
-    state.segments = data.segments || [];
+    state.segments = result.segments || [];
+    const target = $('#translationTarget').value || 'id';
+    state.translationTarget = target;
+    let translationNotice = '';
+    if (state.segments.length) {
+      try {
+        const translated = await runLocalAi('translate', {
+          segments: state.segments,
+          sourceLanguage: $('#sourceLanguage').value,
+          targetLanguage: target
+        }, { signal: controller.signal, onProgress: showLocalProgress });
+        if (state.file !== selectedFile || transcribeController !== controller) return;
+        state.segments = translated.segments;
+        sourceLanguageSelect.value = translated.targetLanguage;
+        sourceLanguageManual = false;
+        translationNotice = ` Diterjemahkan otomatis ke ${$('#translationTarget').selectedOptions[0]?.textContent || target}.`;
+      } catch (translationError) {
+        if (translationError.name === 'AbortError') throw translationError;
+        translationNotice = ` Transkripsi siap, tetapi terjemahan otomatis belum berhasil: ${translationError.message} Pilih bahasa ucapan secara manual lalu tekan Terjemahkan.`;
+      }
+    }
     caption.value = state.segments[0]?.text || '';
     syncCaption(); drawSegments();
-    setStatus(data.historySaved
-      ? `${state.segments.length} segmen siap diedit. Riwayat tersimpan.`
-      : `${state.segments.length} segmen siap diedit. ${data.historyError || 'Riwayat belum tersimpan.'}`, !data.historySaved);
+    setStatus(`${state.segments.length} segmen siap diedit.${translationNotice} Semua pemrosesan berlangsung lokal; video dan teks tidak dikirim ke AI API atau riwayat cloud.`);
     try {
       await saveYoutubeHandoff(selectedFile, {
         name: selectedFile.name || 'video-subtitle.mp4',
@@ -208,7 +286,7 @@ async function transcribeCurrentFile() {
       setStatus(`Subtitle siap, tetapi belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
     }
   } catch (error) {
-    if (error.name !== 'AbortError' && state.file === selectedFile) setStatus(error.message, true);
+    if (error.name !== 'AbortError' && state.file === selectedFile) setStatus(`${error.message} Video dan teks tetap diproses tanpa API AI.`, true);
   } finally {
     if (transcribeController === controller) { transcribeController = null; setBusy(false); }
   }
@@ -219,27 +297,21 @@ $('#translateBtn').onclick = async () => {
   const target = $('#translationTarget').value.trim();
   if (!state.segments.length) return setStatus('Buat teks subtitle terlebih dahulu.', true);
   if (!target) return setStatus('Pilih bahasa tujuan terjemahan.', true);
+  const targetLabel = $('#translationTarget').selectedOptions[0]?.textContent || target;
   const button = $('#translateBtn');
   button.disabled = true;
-  setStatus(`Menerjemahkan subtitle ke ${target}...`);
+  const sourceLanguage = $('#sourceLanguage').value;
+  setStatus(`Menyiapkan penerjemah lokal untuk ${targetLabel}…`);
   try {
-    const response = await authenticatedFetch('/api/translate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: state.segments.map((segment) => segment.text).join('\n'),
-        target,
-        historyId: currentHistoryId
-      })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Terjemahan gagal dibuat.');
-    const translatedLines = String(data.text || '').replace(/\r/g, '').split('\n');
-    if (translatedLines.length !== state.segments.length) {
-      throw new Error('Jumlah baris hasil terjemahan tidak cocok dengan subtitle. Coba ulangi atau edit teks secara manual.');
-    }
-    state.segments = state.segments.map((segment, index) => ({ ...segment, text: translatedLines[index].trim() }));
+    const result = await runLocalAi('translate', {
+      segments: state.segments,
+      sourceLanguage,
+      targetLanguage: target
+    }, { onProgress: showLocalProgress });
+    state.segments = result.segments;
     state.translationTarget = target;
+    sourceLanguageSelect.value = result.targetLanguage;
+    sourceLanguageManual = false;
     caption.value = state.segments[0]?.text || '';
     drawSegments();
     syncCaption();
@@ -249,18 +321,17 @@ $('#translateBtn').onclick = async () => {
       await saveYoutubeHandoff(state.file, {
         name: state.file.name || 'video-terjemahan.mp4',
         captions: state.segments.map((segment) => segment.text).join('\n'),
-        language: target,
+        language: targetLabel,
         title: generatedMetadata?.title,
         description: generatedMetadata?.description,
         tags: generatedMetadata?.tags
       });
       $('#youtubeHandoffLink').hidden = false;
-      setStatus(data.historySaved
-        ? `Terjemahan ${target} siap. Video dan subtitle bisa diteruskan ke YouTube. Riwayat diperbarui.`
-        : `Terjemahan ${target} siap. Video dan subtitle bisa diteruskan ke YouTube.`);
+      const sourceLabel = sourceLanguage === 'auto' ? `Bahasa sumber terdeteksi: ${result.sourceLanguage}. ` : '';
+      setStatus(`${sourceLabel}Terjemahan ${targetLabel} siap. Model berjalan lokal; hasil tidak dikirim ke AI API atau riwayat cloud.`);
     } catch (handoffError) {
       $('#youtubeHandoffLink').hidden = true;
-      setStatus(`Terjemahan ${target} siap, tetapi video belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
+      setStatus(`Terjemahan ${targetLabel} siap, tetapi video belum dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
     }
   } catch (error) {
     setStatus(error.message || 'Terjemahan gagal dibuat.', true);
@@ -300,6 +371,8 @@ window.addEventListener('message', (event) => {
 loadGeneratedVideo();
 $('#exportBtn').onclick = async () => {
   if (!state.file || !state.segments.length) return setStatus('Buat subtitle terlebih dahulu.', true);
+  const exportConfirmed = window.confirm('Ekspor MP4 mengirim video ke server Render untuk dirender dengan FFmpeg. Ini bukan API AI, tetapi file video keluar dari perangkat. Lanjutkan?');
+  if (!exportConfirmed) return setStatus('Ekspor dibatalkan. Video tetap berada di perangkat.');
   const form = new FormData(); form.append('video', state.file); form.append('segments', JSON.stringify(state.segments));
   form.append('color', state.color); form.append('template', state.template); form.append('fontSize', String(state.fontSize)); form.append('position', state.position); form.append('fontFamily', state.fontFamily); form.append('format', state.outputFormat);
   const button = $('#exportBtn');
