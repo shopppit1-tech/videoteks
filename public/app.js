@@ -98,13 +98,25 @@ function runLocalAi(type, payload, { signal, onProgress } = {}) {
   const worker = getLocalAiWorker();
   const id = ++localTaskId;
   return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      if (!pendingLocalTasks.has(id)) return;
+      pendingLocalTasks.delete(id);
+      cleanup();
+      worker.terminate();
+      if (localAiWorker === worker) localAiWorker = null;
+      reject(new Error('Pemrosesan lokal tidak merespons setelah 5 menit. Pastikan internet stabil untuk unduhan awal, coba Chrome, lalu uji video yang lebih pendek.'));
+    }, 5 * 60 * 1000);
     const onAbort = () => {
       pendingLocalTasks.delete(id);
+      cleanup();
       worker.terminate();
       if (localAiWorker === worker) localAiWorker = null;
       reject(new DOMException('Pemrosesan dibatalkan.', 'AbortError'));
     };
-    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onAbort);
+    };
     pendingLocalTasks.set(id, { resolve, reject, onProgress, cleanup });
     signal?.addEventListener('abort', onAbort, { once: true });
     worker.postMessage({ id, type, payload });
