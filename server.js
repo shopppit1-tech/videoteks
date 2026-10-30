@@ -186,7 +186,9 @@ function parseSeoMetadata(value) {
   } catch {
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch {}
+    }
     throw new Error('AI SEO mengembalikan format yang tidak dikenali. Coba lagi.');
   }
 }

@@ -36,8 +36,9 @@ export function createAutoUploadMediaPipeline(dependencies) {
     await Promise.all(files.filter(Boolean).map((file) => fs.rm(file, { force: true }).catch(() => {})));
   }
 
-  async function requestWithKeyRotation(requestModel, body, timeoutMs = 120000) {
-    const keys = geminiKeysInRotation();
+  async function requestWithKeyRotation(requestModel, body, timeoutMs = 120000, preferredKey = '') {
+    const rotatedKeys = geminiKeysInRotation();
+    const keys = preferredKey ? [preferredKey, ...rotatedKeys.filter((key) => key !== preferredKey)] : rotatedKeys;
     if (!keys.length) throw new Error(geminiKeyWaitMessage());
     let lastError = null;
     for (const apiKey of keys) {
@@ -64,14 +65,18 @@ export function createAutoUploadMediaPipeline(dependencies) {
       'Buat judul YouTube maksimal 100 karakter dan deskripsi YouTube informatif 2–4 paragraf maksimal 5000 karakter yang sesuai dengan narasi motivasi. Buat 5–15 tag relevan tanpa tanda # dengan total maksimal 500 karakter.',
       'Kembalikan JSON valid saja dengan bentuk {"narration":"...","title":"...","description":"...","tags":["..."]}. Jangan gunakan markdown atau penjelasan tambahan.'
     ].join('\n\n');
+    const metadataKey = String(process.env.GEMINI_API_KEY_2 || '').trim();
     const { result } = await requestWithKeyRotation(process.env.GEMINI_MODEL || model, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.65, responseMimeType: 'application/json', maxOutputTokens: 3200 }
-    });
+    }, 120000, metadataKey);
     const modelOutput = responseText(result).trim().replace(/^```(?:text|json)?\s*/i, '').replace(/\s*```$/, '').trim();
     let content = null;
     try {
-      const parsed = JSON.parse(modelOutput);
+      const first = modelOutput.indexOf('{');
+      const last = modelOutput.lastIndexOf('}');
+      const jsonText = first >= 0 && last > first ? modelOutput.slice(first, last + 1) : modelOutput;
+      const parsed = JSON.parse(jsonText);
       if (parsed && typeof parsed === 'object') content = parsed;
     } catch {
       content = null;
