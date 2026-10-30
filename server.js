@@ -951,7 +951,16 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
   try {
     console.info('[translate] request:', JSON.stringify({ target: String(target).slice(0, 64), characters: String(text).length, lines: String(text).split(/\r?\n/).length }));
     const prompt = `Terjemahkan setiap baris subtitle berikut ke ${target}. Pertahankan jumlah dan urutan baris. Pisahkan hasil setiap baris dengan token <<<SEG>>> (tepat satu token di antara dua baris). Jangan gunakan token <<<SEG>>> di dalam terjemahan. Kembalikan hanya hasil terjemahan tanpa nomor baris, komentar, markdown, atau baris kosong.\n\n${text}`;
-    const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }, null, 30000, 2, 1);
+    const translationKey = String(process.env.GEMINI_API_KEY_2 || '').trim() || null;
+    console.info(`[translate] provider=gemini key=${translationKey ? '2' : 'rotation'}`);
+    let data;
+    try {
+      data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }, translationKey, 30000, 2, 1);
+    } catch (primaryError) {
+      if (!translationKey || !isGeminiRetryableError(primaryError.status, primaryError.message)) throw primaryError;
+      console.warn('[translate] Gemini API nomor 2 gagal sementara; mencoba rotasi fallback.');
+      data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }, null, 30000, 2, 1);
+    }
     const translatedText = responseText(data).trim();
     let historyId = null;
     let historySaved = false;
