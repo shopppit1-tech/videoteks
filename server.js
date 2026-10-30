@@ -938,7 +938,8 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
   const { text, target = 'Indonesian' } = req.body || {};
   if (!text) return res.status(400).json({ error: 'Teks wajib diisi.' });
   try {
-    const prompt = `Terjemahkan teks subtitle berikut ke ${target}. Pertahankan jumlah baris dan urutan baris. Kembalikan hanya hasil terjemahan tanpa komentar.\n\n${text}`;
+    console.info('[translate] request:', JSON.stringify({ target: String(target).slice(0, 64), characters: String(text).length, lines: String(text).split(/\r?\n/).length }));
+    const prompt = `Terjemahkan setiap baris subtitle berikut ke ${target}. Pertahankan jumlah dan urutan baris. Pisahkan hasil setiap baris dengan token <<<SEG>>> (tepat satu token di antara dua baris). Jangan gunakan token <<<SEG>>> di dalam terjemahan. Kembalikan hanya hasil terjemahan tanpa nomor baris, komentar, markdown, atau baris kosong.\n\n${text}`;
     const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } });
     const translatedText = responseText(data).trim();
     let historyId = null;
@@ -971,7 +972,10 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
       console.warn('[history] terjemahan berhasil, tetapi riwayat gagal disimpan:', historyWriteError.message);
     }
     res.json({ text: translatedText, historyId, historySaved, historyError });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    console.error('[translate] gagal:', e.message || e.name || 'Error');
+    res.status(e.status === 429 ? 429 : 500).json({ error: e.message || 'Terjemahan gagal dibuat.' });
+  }
 });
 
 app.post('/api/export', requireFirebaseUser, upload.single('video'), async (req, res) => {

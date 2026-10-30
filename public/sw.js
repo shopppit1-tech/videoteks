@@ -18,7 +18,7 @@ const SHELL_FILES = [
   'download-utils.js',
   'images/hero-studio-phone.webp',
   'app.html',
-  'app.js',
+  'app.js?v=translate-fix-1',
   'local-ai.worker.js',
   'audio.html',
   'audio.js',

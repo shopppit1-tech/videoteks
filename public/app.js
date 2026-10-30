@@ -234,9 +234,12 @@ $('#translateBtn').onclick = async () => {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'Terjemahan gagal dibuat.');
-    const translatedLines = String(data.text || '').replace(/\r/g, '').split('\n');
+    const rawTranslation = String(data.text || '').replace(/```(?:text)?/gi, '').replace(/```/g, '').trim();
+    const translatedLines = rawTranslation.includes('<<<SEG>>>')
+      ? rawTranslation.split('<<<SEG>>>').map((line) => line.trim())
+      : rawTranslation.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (translatedLines.length !== state.segments.length) {
-      throw new Error('Jumlah baris hasil terjemahan tidak cocok dengan subtitle. Coba ulangi atau edit teks secara manual.');
+      throw new Error(`Format hasil terjemahan tidak cocok (${translatedLines.length} baris untuk ${state.segments.length} subtitle). Coba tekan Terjemahkan lagi.`);
     }
     state.segments = state.segments.map((segment, index) => ({ ...segment, text: translatedLines[index].trim() }));
     state.translationTarget = target;
