@@ -647,7 +647,11 @@ function coolDownGeminiKeyAfterFailure(apiKey, error) {
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2) {
-  const models = [model || 'gemini-3.8-flash'];
+  const models = [...new Set([
+    model || 'gemini-3.8-flash',
+    process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash',
+    'gemini-3.5-flash-lite'
+  ])];
   const attempts = Math.max(1, Math.floor(Number(maxAttempts) || 2));
   let lastError;
   while (true) {
@@ -925,7 +929,7 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
           }
           coolDownGeminiKeyAfterFailure(apiKey, error);
           const waitSeconds = Math.max(1, Math.ceil(((geminiKeyCooldowns.get(apiKey) || Date.now()) - Date.now()) / 1000));
-          console.warn(`[transcribe] key_slot=${keySlot}/${keyCount} temporarily unavailable; rotating, retry_in=${waitSeconds}s status=${error.status || 'network'}`);
+          console.warn(`[transcribe] key_slot=${keySlot}/${keyCount} temporarily unavailable; rotating, retry_in=${waitSeconds}s status=${error.status || 'network'} message=${error.message || 'unknown'}`);
         }
       }
     }
