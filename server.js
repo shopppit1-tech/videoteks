@@ -20,6 +20,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FIREBASE_PROJECT_ID = 'videoteks-a82c1';
 const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || 'https://shopppit1-tech.github.io';
+const YOUTUBE_REQUIRED_SCOPES = [
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.force-ssl'
+];
 let firebaseAdminAuth = null;
 let firebaseDb = null;
 let autoUploadMediaPipeline = null;
@@ -268,12 +272,23 @@ async function refreshAccessTokenForIntegration(ref, config, integrationName) {
   const encryptedToken = snapshot.data()?.refreshTokenEncrypted;
   if (!encryptedToken) throw new Error(`Akun ${integrationName} belum terhubung.`);
   const refreshToken = decryptYoutubeRefreshToken(encryptedToken, config.encryptionKey);
-  const tokens = await youtubeTokenRequest({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    refresh_token: refreshToken,
-    grant_type: 'refresh_token'
-  });
+  let tokens;
+  try {
+    tokens = await youtubeTokenRequest({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    });
+  } catch (error) {
+    if (error.oauthError !== 'invalid_grant') throw error;
+    await ref.delete().catch(() => {});
+    const reconnectError = new Error(`Izin ${integrationName} sudah kedaluwarsa atau dicabut. Tekan "${integrationName === 'Google Drive' ? 'Hubungkan Drive' : 'Hubungkan YouTube'}" untuk menyambungkan kembali.`);
+    reconnectError.status = 401;
+    reconnectError.reconnect = true;
+    reconnectError.integration = integrationName === 'Google Drive' ? 'drive' : 'youtube';
+    throw reconnectError;
+  }
   if (!tokens.access_token) throw new Error(`Akses ${integrationName} tidak dapat diperbarui.`);
   const update = { lastRefreshedAt: Date.now() };
   if (tokens.refresh_token) update.refreshTokenEncrypted = encryptYoutubeRefreshToken(tokens.refresh_token, config.encryptionKey);
@@ -452,7 +467,7 @@ function jakartaDate(date = new Date()) {
   return `${fields.year}-${fields.month}-${fields.day}`;
 }
 
-async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
+async function processOneAutoUpload(jobSnapshot, { force = false, runStartedAt = Date.now() } = {}) {
   const uid = jobSnapshot.id;
   const jobRef = youtubeAutoUploadJobRef(uid);
   const today = jakartaDate();
@@ -463,9 +478,12 @@ async function processOneAutoUpload(jobSnapshot, { force = false } = {}) {
     const current = snapshot.data() || {};
     if (!snapshot.exists || !current.enabled) return { status: 'disabled' };
     if (current.pipelineVersion !== AUTO_UPLOAD_PIPELINE_VERSION) return { status: 'needs_confirmation' };
-    if (current.lastUploadDate === today && !force) return { status: 'already_uploaded' };
+    if (current.lastUploadDate === today && !force) {
+      transaction.set(jobRef, { autoUploadRunStartedAt: runStartedAt, updatedAt: now }, { merge: true });
+      return { status: 'already_uploaded' };
+    }
     if (Number(current.processingUntil || 0) > now) return { status: 'busy' };
-    transaction.set(jobRef, { processing: true, processingStartedAt: now, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
+    transaction.set(jobRef, { processing: true, processingStartedAt: now, autoUploadRunStartedAt: runStartedAt, processingUntil: now + 75 * 60 * 1000, processingStage: 'download', leaseId, updatedAt: now }, { merge: true });
     return { status: 'claimed', settings: current };
   });
   if (claim.status !== 'claimed') return { status: claim.status };
@@ -629,7 +647,11 @@ function coolDownGeminiKeyAfterFailure(apiKey, error) {
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2) {
-  const models = [model || 'gemini-3.8-flash'];
+  const models = [...new Set([
+    model || 'gemini-3.8-flash',
+    process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash',
+    'gemini-3.5-flash-lite'
+  ])];
   const attempts = Math.max(1, Math.floor(Number(maxAttempts) || 2));
   let lastError;
   while (true) {
@@ -792,7 +814,7 @@ async function generateYoutubeMetadataFromCaptions(captions, language = '') {
   if (!keys.length) return null;
   for (const apiKey of keys) {
     try {
-      const result = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35, responseMimeType: 'application/json', maxOutputTokens: 900 } }, apiKey, 60000, 1);
+      const result = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.35, responseMimeType: 'application/json', maxOutputTokens: 900 } }, apiKey, 60000, 3);
       rotateGeminiKeyAfter(apiKey);
       const metadata = parseSeoMetadata(responseText(result));
       const title = String(metadata?.title || '').trim().slice(0, 100);
@@ -874,11 +896,12 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
           const segments = (parsed?.segments || []).map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || (Number(s.start) + 2), text: String(s.text || '').trim() })).filter(s => s.text);
           rotateGeminiKeyAfter(apiKey);
           const text = segments.map(s => s.text).join('\n');
-          // Manual transcription must not wait for optional YouTube metadata.
-          // Metadata is generated in the Drive → YouTube pipeline; keeping it out
-          // of this critical path prevents a temporary Gemini outage from leaving
-          // the APK stuck on "Sedang bekerja..." after transcription succeeded.
-          const metadata = null;
+          let metadata = null;
+          try {
+            metadata = await generateYoutubeMetadataFromCaptions(text);
+          } catch (metadataError) {
+            console.warn('[youtube-metadata] subtitle berhasil, tetapi judul/deskripsi gagal dibuat:', metadataError.message || metadataError.name);
+          }
           let historyId = null;
           let historyErrorMessage = null;
           try {
@@ -906,7 +929,7 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
           }
           coolDownGeminiKeyAfterFailure(apiKey, error);
           const waitSeconds = Math.max(1, Math.ceil(((geminiKeyCooldowns.get(apiKey) || Date.now()) - Date.now()) / 1000));
-          console.warn(`[transcribe] key_slot=${keySlot}/${keyCount} temporarily unavailable; rotating, retry_in=${waitSeconds}s status=${error.status || 'network'}`);
+          console.warn(`[transcribe] key_slot=${keySlot}/${keyCount} temporarily unavailable; rotating, retry_in=${waitSeconds}s status=${error.status || 'network'} message=${error.message || 'unknown'}`);
         }
       }
     }
@@ -919,6 +942,7 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
   const { text, target = 'Indonesian' } = req.body || {};
   if (!text) return res.status(400).json({ error: 'Teks wajib diisi.' });
   try {
+    console.info('[translate] request:', JSON.stringify({ target: String(target).slice(0, 64), characters: String(text).length, lines: String(text).split(/\r?\n/).length }));
     const prompt = `Terjemahkan setiap baris subtitle berikut ke ${target}. Pertahankan jumlah dan urutan baris. Pisahkan hasil setiap baris dengan token <<<SEG>>> (tepat satu token di antara dua baris). Jangan gunakan token <<<SEG>>> di dalam terjemahan. Kembalikan hanya hasil terjemahan tanpa nomor baris, komentar, markdown, atau baris kosong.\n\n${text}`;
     const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } });
     const translatedText = responseText(data).trim();
@@ -952,7 +976,10 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
       console.warn('[history] terjemahan berhasil, tetapi riwayat gagal disimpan:', historyWriteError.message);
     }
     res.json({ text: translatedText, historyId, historySaved, historyError });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    console.error('[translate] gagal:', e.message || e.name || 'Error');
+    res.status(e.status === 429 ? 429 : 500).json({ error: e.message || 'Terjemahan gagal dibuat.' });
+  }
 });
 
 app.post('/api/export', requireFirebaseUser, upload.single('video'), async (req, res) => {
@@ -1009,31 +1036,38 @@ app.post('/api/replace-audio', requireFirebaseUser, upload.fields([{ name: 'vide
     const audioMode = ['auto', 'manual', 'original'].includes(requestedMode) ? requestedMode : (req.body.fitAudio === 'false' ? 'original' : 'auto');
     const requestedManualSpeed = Number(req.body.manualSpeed);
     const manualSpeed = Number.isFinite(requestedManualSpeed) ? Math.min(2, Math.max(0.5, requestedManualSpeed)) : 1;
-    const speed = audioMode === 'manual' ? manualSpeed : audioDuration / duration;
+    const speed = audioMode === 'manual' ? manualSpeed : 1;
+    const outputDuration = audioMode === 'auto' ? audioDuration : duration;
     const atempoFilters = [];
-    if (audioMode !== 'original') {
+    if (audioMode === 'manual') {
       let remainingSpeed = speed;
       while (remainingSpeed > 2) { atempoFilters.push('atempo=2'); remainingSpeed /= 2; }
       while (remainingSpeed < 0.5) { atempoFilters.push('atempo=0.5'); remainingSpeed /= 0.5; }
       atempoFilters.push(`atempo=${remainingSpeed.toFixed(6)}`);
     }
 
-    const inputArgs = ['-y', '-i', videoFile.path];
+    const inputArgs = ['-y'];
+    if (audioMode === 'auto') inputArgs.push('-stream_loop', '-1');
+    inputArgs.push('-i', videoFile.path);
     if (audioMode === 'original') inputArgs.push('-stream_loop', '-1');
     inputArgs.push('-i', audioFile.path);
     const commonArgs = [...inputArgs, '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '0'];
-    if (audioMode !== 'original') commonArgs.push('-af', `${atempoFilters.join(',')},apad`);
-    commonArgs.push('-t', duration.toFixed(3), '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
-    let videoMode = 'copy';
-    try {
-      await exec('ffmpeg', [...commonArgs, '-c:v', 'copy', out]);
-    } catch {
-      await cleanup(out);
-      videoMode = 'h264-fallback';
+    if (audioMode === 'manual') commonArgs.push('-af', `${atempoFilters.join(',')},apad`);
+    commonArgs.push('-t', outputDuration.toFixed(3), '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
+    let videoMode = audioMode === 'auto' ? 'h264-fit-to-audio' : 'copy';
+    if (audioMode === 'auto') {
       await exec('ffmpeg', [...commonArgs, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', out]);
+    } else {
+      try {
+        await exec('ffmpeg', [...commonArgs, '-c:v', 'copy', out]);
+      } catch {
+        await cleanup(out);
+        videoMode = 'h264-fallback';
+        await exec('ffmpeg', [...commonArgs, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25', '-pix_fmt', 'yuv420p', out]);
+      }
     }
     const outputStats = await fs.stat(out);
-    console.info(`[replace-audio] complete videoMode=${videoMode} audioMode=${audioMode} speed=${audioMode === 'original' ? 'original' : speed.toFixed(3)} videoDuration=${duration.toFixed(2)} audioDuration=${audioDuration.toFixed(2)} inputVideoBytes=${videoFile.size} inputAudioBytes=${audioFile.size} outputBytes=${outputStats.size}`);
+    console.info(`[replace-audio] complete videoMode=${videoMode} audioMode=${audioMode} speed=${audioMode === 'manual' ? speed.toFixed(3) : 'unchanged'} videoDuration=${duration.toFixed(2)} audioDuration=${audioDuration.toFixed(2)} outputDuration=${outputDuration.toFixed(2)} inputVideoBytes=${videoFile.size} inputAudioBytes=${audioFile.size} outputBytes=${outputStats.size}`);
     let historyId = null;
     try {
       const historyDoc = await historyCollection(req.firebaseUser.uid).add({
@@ -1042,9 +1076,10 @@ app.post('/api/replace-audio', requireFirebaseUser, upload.fields([{ name: 'vide
         fileName: String(videoFile.originalname || 'video').replace(/[\u0000-\u001f]/g, '').slice(0, 180),
         audioFileName: String(audioFile.originalname || 'audio').replace(/[\u0000-\u001f]/g, '').slice(0, 180),
         audioMode,
-        speed: audioMode === 'original' ? null : Number(speed.toFixed(3)),
+        speed: audioMode === 'manual' ? Number(speed.toFixed(3)) : null,
         videoDuration: Number(duration.toFixed(2)),
         audioDuration: Number(audioDuration.toFixed(2)),
+        outputDuration: Number(outputDuration.toFixed(2)),
         createdAt: Date.now(),
         updatedAt: Date.now()
       });
@@ -1378,6 +1413,22 @@ app.post('/api/youtube/seo-metadata', requireFirebaseUser, async (req, res) => {
  */
 /* legacy block removed */
 
+app.get('/api/youtube/status', requireFirebaseUser, async (req, res) => {
+  const config = youtubeOAuthConfig();
+  try {
+    const snapshot = await youtubeIntegrationRef(req.firebaseUser.uid).get();
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      configured: Boolean(config),
+      connected: Boolean(snapshot.data()?.refreshTokenEncrypted),
+      clientId: config?.clientId || null
+    });
+  } catch (error) {
+    console.error('[youtube] gagal membaca status koneksi:', error.message);
+    res.status(500).json({ error: 'Status koneksi YouTube gagal dimuat.' });
+  }
+});
+
 app.post('/api/youtube/connect', requireFirebaseUser, async (req, res) => {
   const config = youtubeOAuthConfig();
   if (!config) return res.status(503).json({ error: 'Integrasi YouTube belum dikonfigurasi di server.' });
@@ -1398,9 +1449,10 @@ app.post('/api/youtube/connect', requireFirebaseUser, async (req, res) => {
       redirect_uri: YOUTUBE_REDIRECT_URI,
       grant_type: 'authorization_code'
     });
-    const grantedScopes = String(tokens.scope || '').split(/\s+/);
-    if (!tokens.access_token || (tokens.scope && !grantedScopes.includes('https://www.googleapis.com/auth/youtube.upload'))) {
-      return res.status(403).json({ error: 'Google tidak memberikan izin unggah YouTube yang diperlukan.' });
+    const grantedScopes = String(tokens.scope || '').split(/\s+/).filter(Boolean);
+    const missingScopes = YOUTUBE_REQUIRED_SCOPES.filter((scope) => !grantedScopes.includes(scope));
+    if (!tokens.access_token || missingScopes.length) {
+      return res.status(403).json({ error: 'Google belum memberikan izin upload video dan pengelolaan track subtitle. Setujui semua izin YouTube yang diminta, lalu coba sambungkan lagi.' });
     }
     const ref = youtubeIntegrationRef(req.firebaseUser.uid);
     const existing = await ref.get();
@@ -1434,8 +1486,16 @@ app.get('/api/youtube/access-token', requireFirebaseUser, async (req, res) => {
   const ref = youtubeIntegrationRef(req.firebaseUser.uid);
   try {
     const snapshot = await ref.get();
-    const encryptedToken = snapshot.data()?.refreshTokenEncrypted;
+    const integration = snapshot.data() || {};
+    const encryptedToken = integration.refreshTokenEncrypted;
     if (!encryptedToken) return res.status(404).json({ error: 'Akun YouTube belum terhubung.', reconnect: true });
+    const storedScopes = Array.isArray(integration.scopes) ? integration.scopes : [];
+    if (YOUTUBE_REQUIRED_SCOPES.some((scope) => !storedScopes.includes(scope))) {
+      return res.status(403).json({
+        error: 'Izin akun YouTube belum mencakup pengiriman track subtitle. Hubungkan akun kembali dan setujui izin YouTube yang diminta.',
+        reconnect: true
+      });
+    }
     const refreshToken = decryptYoutubeRefreshToken(encryptedToken, config.encryptionKey);
     const tokens = await youtubeTokenRequest({
       client_id: config.clientId,
@@ -1632,6 +1692,10 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
     }, { merge: true });
     res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '18:00', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
   } catch (error) {
+    if (error.reconnect) {
+      console.warn('[youtube-auto-upload] izin integrasi perlu disambungkan ulang:', error.integration);
+      return res.status(401).json({ error: error.message, reconnect: true, integration: error.integration });
+    }
     console.error('[youtube-auto-upload] gagal menyimpan pengaturan:', error.message || error.name);
     res.status(error.status === 401 || error.status === 403 ? 400 : 502).json({ error: error.message || 'Pengaturan upload otomatis gagal disimpan.' });
   }
@@ -1648,20 +1712,48 @@ app.post('/api/internal/youtube-auto-upload/run', async (req, res) => {
   if (!firebaseDb) return res.status(503).json({ error: 'Firestore belum dikonfigurasi untuk antrean otomatis.' });
   try {
     const force = req.body?.force === true;
+    const runStartedAt = Date.now();
     const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
-    const results = [];
-    for (const job of jobs.docs) results.push(await processOneAutoUpload(job, { force }));
-    const summary = results.reduce((counts, result) => {
-      counts[result.status] = (counts[result.status] || 0) + 1;
-      return counts;
-    }, {});
-    console.info('[youtube-auto-upload] daily run:', JSON.stringify(summary));
-    const hasErrors = Number(summary.error || 0) > 0;
-    res.set('Cache-Control', 'no-store').status(hasErrors ? 502 : 200).json({ ok: !hasErrors, summary });
+    // Render may terminate a request after roughly 15 minutes while media is processed.
+    // Start the bounded Firestore jobs in the background and let Actions poll status.
+    void (async () => {
+      const results = [];
+      for (const job of jobs.docs) results.push(await processOneAutoUpload(job, { force, runStartedAt }));
+      const summary = results.reduce((counts, result) => {
+        counts[result.status] = (counts[result.status] || 0) + 1;
+        return counts;
+      }, {});
+      console.info('[youtube-auto-upload] daily run:', JSON.stringify(summary));
+    })().catch((error) => console.error('[youtube-auto-upload] background run failed:', error.message || error.name));
+    res.set('Cache-Control', 'no-store').status(202).json({ ok: true, accepted: true, runStartedAt, jobCount: jobs.size });
   } catch (error) {
     console.error('[youtube-auto-upload] daily run failed:', error.message || error.name);
     res.status(500).json({ error: 'Pemrosesan antrean YouTube harian gagal.' });
   }
+});
+
+app.get('/api/internal/youtube-auto-upload/status', async (req, res) => {
+  try {
+    const token = /^Bearer\s+(.+)$/i.exec(req.get('authorization') || '')?.[1];
+    if (!token) return res.status(401).json({ error: 'Workflow otomatis tidak terautentikasi.' });
+    await verifyGithubActionsOidcToken(token);
+  } catch (error) {
+    return res.status(401).json({ error: error.message || 'Workflow otomatis tidak terautentikasi.' });
+  }
+  if (!firebaseDb) return res.status(503).json({ error: 'Firestore belum dikonfigurasi untuk antrean otomatis.' });
+  const since = Number(req.query.since || 0);
+  const expected = Math.max(0, Number(req.query.expected || 0));
+  const jobs = await firebaseDb.collection('youtubeAutoUploadJobs').where('enabled', '==', true).limit(20).get();
+  const today = jakartaDate();
+  const items = jobs.docs.flatMap((job) => {
+    const data = job.data() || {};
+    const item = { id: job.id, processing: Boolean(data.processing), status: data.status || 'off', runStartedAt: Number(data.autoUploadRunStartedAt || 0), lastError: data.lastError || '', lastVideoId: data.lastVideoId || null };
+    const alreadyUploadedToday = item.status === 'uploaded' && data.lastUploadDate === today && !item.processing;
+    return !since || item.runStartedAt >= since || alreadyUploadedToday ? [item] : [];
+  });
+  const done = items.length >= expected && items.every((item) => item.status === 'error' || (!item.processing && ['uploaded', 'empty', 'already_uploaded', 'disabled'].includes(item.status)));
+  const hasErrors = items.some((item) => item.status === 'error');
+  res.set('Cache-Control', 'no-store').json({ ok: !hasErrors, done, hasErrors, items });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(process.cwd(), 'public', 'index.html')));
