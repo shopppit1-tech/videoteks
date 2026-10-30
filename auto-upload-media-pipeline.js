@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const AUTO_VOICE = 'Kore';
-const AUTO_STYLE = 'ceria dan bersemangat';
+const AUTO_VOICE = 'Charon';
+const AUTO_STYLE = 'berwibawa, tenang, tegas, profesional, dan memotivasi';
 const DEFAULT_SUBTITLE_SETTINGS = {
   color: '#ec4899',
   template: 'pill',
