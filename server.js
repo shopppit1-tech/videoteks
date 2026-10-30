@@ -898,7 +898,9 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
           const text = segments.map(s => s.text).join('\n');
           let metadata = null;
           try {
-            metadata = await generateYoutubeMetadataFromCaptions(text);
+            // Optional metadata must not block the manual subtitle response.
+            // The Drive → YouTube pipeline generates metadata independently.
+            metadata = null;
           } catch (metadataError) {
             console.warn('[youtube-metadata] subtitle berhasil, tetapi judul/deskripsi gagal dibuat:', metadataError.message || metadataError.name);
           }
