@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const AUTO_VOICE = 'Orus';
-const AUTO_STYLE = 'suara pria dewasa, nada rendah, berwibawa, tenang, tegas, profesional, jelas, dan memotivasi';
+const AUTO_VOICE = 'Kore';
+const AUTO_STYLE = 'suara wanita dewasa, berwibawa, tenang, tegas, profesional, jelas, hangat, dan memotivasi';
 const DEFAULT_SUBTITLE_SETTINGS = {
   color: '#ec4899',
   template: 'pill',
