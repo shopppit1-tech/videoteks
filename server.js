@@ -646,7 +646,7 @@ function coolDownGeminiKeyAfterFailure(apiKey, error) {
   rotateGeminiKeyAfter(apiKey);
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2) {
+async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2, maxCycles = 0) {
   const models = [...new Set([
     model || 'gemini-3.8-flash',
     process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash',
@@ -654,7 +654,10 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, ma
   ])];
   const attempts = Math.max(1, Math.floor(Number(maxAttempts) || 2));
   let lastError;
+  let cycles = 0;
   while (true) {
+    cycles += 1;
+    if (maxCycles > 0 && cycles > maxCycles) throw lastError || new Error('Gemini sedang tidak tersedia setelah beberapa percobaan.');
     const keys = fixedKey ? [fixedKey] : geminiKeysInRotation();
     if (!keys.length) {
       const waits = configuredGeminiKeys().map(key => (geminiKeyCooldowns.get(key) || Date.now()) - Date.now()).filter(wait => wait > 0);
@@ -946,7 +949,7 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
   try {
     console.info('[translate] request:', JSON.stringify({ target: String(target).slice(0, 64), characters: String(text).length, lines: String(text).split(/\r?\n/).length }));
     const prompt = `Terjemahkan setiap baris subtitle berikut ke ${target}. Pertahankan jumlah dan urutan baris. Pisahkan hasil setiap baris dengan token <<<SEG>>> (tepat satu token di antara dua baris). Jangan gunakan token <<<SEG>>> di dalam terjemahan. Kembalikan hanya hasil terjemahan tanpa nomor baris, komentar, markdown, atau baris kosong.\n\n${text}`;
-    const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } });
+    const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }, null, 30000, 2, 1);
     const translatedText = responseText(data).trim();
     let historyId = null;
     let historySaved = false;
