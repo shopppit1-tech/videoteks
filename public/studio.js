@@ -8,6 +8,7 @@ const ROUTES = {
   youtube: { file: 'youtube.html', title: 'Upload YouTube' },
   driveAutoUpload: { file: 'drive-auto-upload.html', title: 'Google Drive ke YouTube' },
   history: { file: 'history.html', title: 'Riwayat' },
+  animasi: { file: 'animasi.html', title: 'Animasi AI' },
   privacy: { file: 'privacy.html', title: 'Kebijakan Privasi' },
   terms: { file: 'terms.html', title: 'Syarat Penggunaan' },
   delete: { file: 'delete-account.html', title: 'Hapus akun' }

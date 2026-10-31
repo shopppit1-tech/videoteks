@@ -4,7 +4,8 @@ const FEATURE_ROUTES = {
   'voice.html': 'voice',
   'youtube.html': 'youtube',
   'drive-auto-upload.html': 'driveAutoUpload',
-  'history.html': 'history'
+  'history.html': 'history',
+  'animasi.html': 'animasi'
 };
 const SHELL_ROUTES = {
   ...FEATURE_ROUTES,

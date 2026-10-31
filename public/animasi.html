@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0c0f1b">
+  <link rel="manifest" href="manifest.webmanifest">
+  <script src="page-navigation.js" defer></script>
+  <link rel="stylesheet" href="animasi.css">
+  <title>Animasi AI Studio — VideoTeks</title>
+</head>
+<body>
+  <main class="animasi-app">
+    <nav class="top-nav" aria-label="Pilih fitur">
+      <a href="app.html">Subtitle Video</a><a href="audio.html?standalone=1">Ganti Audio</a><a href="voice.html?standalone=1">Suara AI</a><a href="youtube.html">YouTube</a><a class="active" href="animasi.html" aria-current="page">Animasi AI</a>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy"><span class="eyebrow">AUTOMATED ANIMATION FACTORY</span><h1>Buat animasi.<br><em>Terbitkan otomatis.</em></h1><p>Buat hook animasi visual 15 detik tanpa narasi, dialog, musik, maupun teks. Cerita disampaikan melalui aksi dan ekspresi universal.</p><div class="hero-actions"><button class="primary" id="heroCreate" type="button">✦ Buat video hook</button><span class="availability"><i></i> Dashboard siap digunakan</span></div></div>
+      <div class="hero-art" aria-hidden="true"><div class="orb">🐼</div><span class="fox">🦊</span><span class="turtle">🐢</span><div class="spark s1">✦</div><div class="spark s2">✧</div></div>
+    </header>
+
+    <section class="stats" aria-label="Status studio"><div><small>Mesin video</small><b>Google Flow</b><span class="stat-note">Browser worker</span></div><div><small>Mode produksi</small><b>Hook · 15 detik</b><span class="stat-note">Visual storytelling</span></div><div><small>Audio</small><b>Nonaktif / silent</b><span class="stat-note">Tanpa suara</span></div></section>
+
+    <div class="columns">
+      <section class="panel" id="productionPanel"><div class="panel-head"><div><span class="eyebrow">01 / PRODUKSI</span><h2>Buat video hook</h2></div><span class="pill">AI GENERATOR</span></div>
+        <label>Mode produksi<select disabled><option>Hook visual · 15 detik</option></select></label>
+        <label>Ide hook<textarea id="idea" maxlength="1000">Seekor panda kecil menemukan bintang jatuh dan bekerja sama dengan teman-temannya untuk mengembalikannya ke langit.</textarea></label>
+        <button class="secondary full" id="newIdea" type="button">✦ Buat ide unik dengan AI</button>
+        <p class="hint">AI membuat konsep yang berbeda dari riwayat ide sebelumnya saat produksi otomatis berjalan.</p>
+        <label>Gaya visual<select id="visualStyle"><option>Animasi 3D keluarga, warna cerah, sinematik</option><option>Stop-motion clay animation yang lucu</option><option>Animasi 3D bergaya dongeng fantasi</option><option>Animasi kartun 3D komedi slapstick</option></select></label>
+        <label>Format video<select id="aspect"><option value="9:16">YouTube Shorts · 9:16 (disarankan)</option><option value="16:9">YouTube biasa · 16:9</option></select></label>
+        <label class="check"><input id="autoUpload" type="checkbox" checked> Upload otomatis ke YouTube dan Google Drive setelah video selesai</label>
+        <button class="primary full" id="produce" type="button">✦ Buat video hook 15 detik</button><p class="hint">Hubungkan Google Flow worker untuk menjalankan render video dari komputer yang selalu aktif.</p>
+      </section>
+
+      <section class="panel" id="schedulerPanel"><div class="panel-head"><div><span class="eyebrow">02 / OTOMATISASI</span><h2>Produksi harian</h2></div><span class="pill green">SCHEDULER</span></div>
+        <label class="check big"><input id="daily" type="checkbox"> Aktifkan produksi otomatis harian</label>
+        <label>Jumlah video per hari<select id="dailyCount"><option>1 video</option><option>2 video</option><option>3 video</option><option>5 video</option></select></label>
+        <label>Jam mulai produksi (WIB)<input id="publishHour" type="number" min="0" max="23" value="10"></label>
+        <button class="secondary full" id="saveSettings" type="button">Simpan pengaturan otomatis</button>
+        <div class="schedule-preview"><span class="schedule-icon">◷</span><div><strong id="scheduleState">Jadwal belum aktif</strong><small>Server dan Flow worker harus aktif terus-menerus.</small></div></div>
+      </section>
+    </div>
+
+    <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">FLOW / BROWSER WORKER</span><h2>Koneksi Google Flow</h2></div><span id="flowBadge" class="pill">BELUM DIKONFIGURASI</span></div><p id="flowInfo">Worker Flow berjalan di komputer desktop dan terhubung melalui HTTPS tunnel yang dilindungi secret.</p><button class="secondary" id="checkFlow" type="button">Periksa koneksi Flow</button><p class="hint">Login Google dilakukan manual pada jendela Chromium worker. Jangan kirim password atau cookie ke dashboard.</p></section>
+
+    <div class="columns lower"><section class="panel"><div class="panel-head"><div><span class="eyebrow">03 / DISTRIBUSI</span><h2>Koneksi Google</h2></div><span class="pill muted">BELUM TERHUBUNG</span></div><p class="muted-text">Hubungkan akun Google untuk memberi izin upload ke channel YouTube dan menyimpan salinan MP4 ke Google Drive.</p><button class="secondary" id="connectGoogle" type="button">▶ Hubungkan YouTube + Drive</button><p class="hint">Upload default bersifat private agar hasil dapat diperiksa sebelum dipublikasikan.</p></section>
+      <section class="panel"><div class="panel-head"><div><span class="eyebrow">04 / IDE HARIAN</span><h2>Riwayat ide unik</h2></div><button class="textbtn" id="clearIdeas" type="button">Bersihkan</button></div><div id="ideaHistory" class="history"><div class="empty">Belum ada ide otomatis.</div></div></section></div>
+
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">05 / ANTRIAN</span><h2>Riwayat produksi</h2></div><span class="pill muted" id="queueCount">0 JOB</span></div><div id="jobs" class="history"><div class="empty">Belum ada produksi. Buat animasi pertama kamu.</div></div></section>
+    <footer>Animasi AI Studio · Hasil AI perlu diperiksa sebelum dipublikasikan. Pastikan konten mematuhi kebijakan platform.</footer>
+  </main>
+  <script src="animasi.js" defer></script>
+</body>
+</html>
