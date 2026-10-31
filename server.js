@@ -720,6 +720,9 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, ma
 function animationGeminiKey() {
   return String(process.env.GEMINI_API_KEY_2 || '').trim();
 }
+const GEMINI_OMNI_VIDEO_MODEL = 'gemini-omni-1.1-flash';
+const animationJobs = new Map();
+let activeAnimationJobId = null;
 function parseGeminiJson(data) {
   const text = responseText(data).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   const start = text.indexOf('{');
@@ -734,46 +737,120 @@ async function createAnimationPlan({ idea, style, aspectRatio }) {
     error.status = 503;
     throw error;
   }
-  const prompt = `Create a production-ready, family-friendly, wordless 30-second 3D animation story split into exactly 3 sequential 10-second video clips. Return JSON only with this exact schema: {"title":"short English title","idea":"concise Indonesian concept","hook":"the surprising first-frame action","payoff":"the visual payoff","scenes":[{"number":1,"visual_action":"setup and hook","video_prompt":"detailed English Google Flow prompt for a 10-second clip"},{"number":2,"visual_action":"rising action and continuity from scene 1","video_prompt":"detailed English Google Flow prompt for a 10-second clip"},{"number":3,"visual_action":"clear payoff and ending","video_prompt":"detailed English Google Flow prompt for a 10-second clip"}]}. Idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda, Lala the small orange fox, and Tutu the tiny green turtle unless the idea requires fewer characters. No narration, dialogue, music, sound effects, subtitles, text, letters, signs, logos, copyrighted characters, violence, or frightening content. Scene 1 must begin with the hook in the first frame. Scene 2 must continue exactly from scene 1. Scene 3 must complete the payoff and end cleanly. Repeat character appearance details and continuity details in every video_prompt.`;
+  const prompt = `Create a production-ready, family-friendly, wordless 30-second 3D animation story for Gemini Omni Flash. Plan one continuous video as three sequential 10-second story beats that will be generated using Gemini video extension. Return JSON only with this exact schema: {"title":"short English title","idea":"concise Indonesian concept","hook":"the surprising first-frame action","payoff":"the visual payoff","scenes":[{"number":1,"visual_action":"setup and hook","video_prompt":"detailed English Gemini Omni Flash prompt for the initial 10-second segment"},{"number":2,"visual_action":"rising action and continuity from scene 1","video_prompt":"detailed English Gemini Omni Flash continuation prompt for the next 10 seconds"},{"number":3,"visual_action":"clear payoff and ending","video_prompt":"detailed English Gemini Omni Flash continuation prompt for the final 10 seconds"}]}. Idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda, Lala the small orange fox, and Tutu the tiny green turtle unless the idea requires fewer characters. No narration, dialogue, music, sound effects, subtitles, text, letters, signs, logos, copyrighted characters, violence, or frightening content. Scene 1 must start with the hook immediately. Scene 2 and 3 must continue the same action, characters, setting, and visual style without restarting. End the final beat with a clear visual payoff. Repeat the characters' appearance and continuity details in every video_prompt.`;
   const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85, responseMimeType: 'application/json', maxOutputTokens: 2600 } }, apiKey, 60000, 1, 1, true);
   const plan = parseGeminiJson(data);
   if (!Array.isArray(plan.scenes) || plan.scenes.length < 3 || plan.scenes.slice(0, 3).some(scene => !scene.video_prompt)) throw new Error('Gemini belum menghasilkan tiga prompt adegan yang lengkap.');
   return { title: String(plan.title || 'Animated 30-Second Story').slice(0, 100), idea: String(plan.idea || idea).slice(0, 1200), hook: String(plan.hook || ''), payoff: String(plan.payoff || ''), scenes: plan.scenes.slice(0, 3).map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action || ''), video_prompt: String(scene.video_prompt).slice(0, 5000) })) };
 }
-async function createFlowClip(prompt, aspectRatio) {
-  const base = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
-  const secret = String(process.env.FLOW_WORKER_SECRET || '');
-  if (!base || !secret) {
-    const error = new Error('Google Flow worker belum dikonfigurasi. Isi FLOW_WORKER_URL dan FLOW_WORKER_SECRET di environment server.');
-    error.status = 503;
-    throw error;
+function geminiVideoPart(interaction) {
+  if (interaction?.output_video?.uri || interaction?.output_video?.data) return interaction.output_video;
+  for (const step of interaction?.steps || []) {
+    if (step.type !== 'model_output') continue;
+    const part = (step.content || []).find(content => content.type === 'video' && (content.uri || content.data));
+    if (part) return part;
   }
-  const response = await fetch(`${base}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-flow-worker-secret': secret }, body: JSON.stringify({ prompt, aspectRatio }), signal: AbortSignal.timeout(Number(process.env.FLOW_WORKER_TIMEOUT_MS || 300000)) });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    const error = new Error(data.error || `Google Flow worker gagal: HTTP ${response.status}`);
-    error.status = response.status >= 500 ? 503 : response.status;
-    throw error;
-  }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length < 10000) throw new Error('Google Flow worker mengembalikan file video yang tidak valid.');
-  return bytes;
+  return null;
 }
-async function renderAnimation(plan, aspectRatio) {
+async function createGeminiVideoInteraction({ apiKey, prompt, aspectRatio, previousInteractionId = '' }) {
+  const body = {
+    model: GEMINI_OMNI_VIDEO_MODEL,
+    input: prompt,
+    background: true,
+    response_format: { type: 'video', delivery: 'uri', aspect_ratio: aspectRatio }
+  };
+  if (previousInteractionId) body.previous_interaction_id = previousInteractionId;
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+  const signal = AbortSignal.timeout(10 * 60 * 1000);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify(body),
+    signal
+  });
+  let interaction = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = interaction?.error?.message || `Gemini Omni Flash gagal: HTTP ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status === 429 ? 429 : (response.status >= 500 ? 503 : response.status);
+    throw error;
+  }
+  if (interaction.status === 'failed') throw new Error(interaction.error?.message || 'Gemini Omni Flash gagal membuat video.');
+  if (!geminiVideoPart(interaction) && interaction.id) {
+    const deadline = Date.now() + 8 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await sleep(5000);
+      const statusResponse = await fetch(`${endpoint}/${encodeURIComponent(interaction.id)}`, {
+        headers: { 'x-goog-api-key': apiKey },
+        signal: AbortSignal.timeout(30000)
+      });
+      const statusData = await statusResponse.json().catch(() => ({}));
+      if (!statusResponse.ok) throw new Error(statusData?.error?.message || `Tidak dapat memeriksa video Gemini: HTTP ${statusResponse.status}`);
+      interaction = statusData;
+      if (interaction.status === 'failed') throw new Error(interaction.error?.message || 'Gemini Omni Flash gagal membuat video.');
+      if (geminiVideoPart(interaction)) break;
+    }
+  }
+  if (!interaction.id || !geminiVideoPart(interaction)) throw new Error('Gemini tidak mengembalikan hasil video. Periksa tier API dan coba lagi setelah memeriksa pemakaian akun.');
+  return interaction;
+}
+async function downloadGeminiVideo(videoPart, apiKey, destination) {
+  if (videoPart.data) {
+    await fs.writeFile(destination, Buffer.from(videoPart.data, 'base64'));
+  } else if (videoPart.uri) {
+    const uri = new URL(videoPart.uri);
+    if (uri.hostname !== 'generativelanguage.googleapis.com') throw new Error('URI video Gemini tidak dikenali.');
+    const match = uri.pathname.match(/\/files\/([a-zA-Z0-9_-]+)/);
+    if (!match) throw new Error('ID file video Gemini tidak ditemukan.');
+    const fileName = `files/${match[1]}`;
+    const fileEndpoint = `https://generativelanguage.googleapis.com/v1beta/${fileName}`;
+    const deadline = Date.now() + 4 * 60 * 1000;
+    let active = false;
+    while (Date.now() < deadline) {
+      const statusResponse = await fetch(fileEndpoint, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(30000) });
+      const statusData = await statusResponse.json().catch(() => ({}));
+      if (!statusResponse.ok) throw new Error(statusData?.error?.message || `File video Gemini gagal diperiksa: HTTP ${statusResponse.status}`);
+      if (statusData.state === 'FAILED') throw new Error('Pemrosesan file video Gemini gagal.');
+      if (statusData.state === 'ACTIVE') { active = true; break; }
+      await sleep(5000);
+    }
+    if (!active) throw new Error('File video Gemini belum siap diunduh.');
+    const downloadUrl = `https://generativelanguage.googleapis.com/v1beta/${fileName}:download?alt=media`;
+    const downloadResponse = await fetch(downloadUrl, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(120000) });
+    if (!downloadResponse.ok) throw new Error(`Unduhan video Gemini gagal: HTTP ${downloadResponse.status}`);
+    await fs.writeFile(destination, Buffer.from(await downloadResponse.arrayBuffer()));
+  } else {
+    throw new Error('Gemini tidak memberikan data atau URI video.');
+  }
+  const stat = await fs.stat(destination);
+  if (stat.size < 10000) throw new Error('File video Gemini terlalu kecil atau tidak valid.');
+}
+async function renderAnimation(plan, aspectRatio, onProgress = () => {}) {
   const id = crypto.randomUUID();
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'videoteks-animasi-'));
-  const clipPaths = [];
+  const source = path.join(tempDir, 'gemini-omni.mp4');
   const output = path.join(ANIMASI_DIR, `${id}.mp4`);
   try {
-    for (const scene of plan.scenes) {
-      const clipPath = path.join(tempDir, `clip-${scene.number}.mp4`);
-      await fs.writeFile(clipPath, await createFlowClip(`${scene.video_prompt}\nGenerate exactly a 10-second video clip. Start immediately with the action. This clip is scene ${scene.number} of 3 and must preserve continuity with the story. Silent visual-only animation. No audio, speech, text, subtitles or logos.`, aspectRatio));
-      clipPaths.push(clipPath);
+    const apiKey = animationGeminiKey();
+    if (!apiKey) {
+      const error = new Error('GEMINI_API_KEY_2 belum dikonfigurasi untuk Gemini Omni Flash.');
+      error.status = 503;
+      throw error;
     }
-    const concatFile = path.join(tempDir, 'concat.txt');
-    await fs.writeFile(concatFile, clipPaths.map(file => `file '${file.replaceAll("'", "'\\''")}'`).join('\n'));
-    await exec('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', concatFile, '-t', '30', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', output]);
-    return { id, videoUrl: `/generated-animations/${id}.mp4` };
+    let previousInteractionId = '';
+    let finalInteraction;
+    for (const [index, scene] of plan.scenes.entries()) {
+      onProgress(index === 0 ? 'Gemini Omni Flash membuat bagian pembuka…' : `Gemini Omni Flash memperpanjang cerita (${index + 1}/3)…`);
+      const prompt = index === 0
+        ? `Create the opening 10-second segment of one continuous 30-second silent animated story. Start with this action in the first frame. Use this story beat: ${scene.video_prompt}. Keep the characters and visual style consistent for later continuation. No dialogue, narration, music, sound effects, text, subtitles, or logos. Aspect ratio ${aspectRatio}.`
+        : `Extend the existing video by 10 seconds with a seamless continuation. This is story beat ${index + 1} of 3: ${scene.video_prompt}. Preserve the exact same characters, their appearance, setting, lighting, animation style, and ongoing action from the previous video. Do not restart or recap. Continue naturally and leave the story ready for the next beat. Silent visual-only animation: no dialogue, narration, music, sound effects, text, subtitles, or logos. Aspect ratio ${aspectRatio}.`;
+      finalInteraction = await createGeminiVideoInteraction({ apiKey, prompt, aspectRatio, previousInteractionId });
+      previousInteractionId = finalInteraction.id;
+    }
+    onProgress('Mengunduh hasil dan menyiapkan MP4 tanpa audio…');
+    await downloadGeminiVideo(geminiVideoPart(finalInteraction), apiKey, source);
+    await exec('ffmpeg', ['-y', '-i', source, '-vf', 'tpad=stop_mode=clone:stop_duration=30', '-t', '30', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output]);
+    return { id, videoUrl: `/generated-animations/${id}.mp4`, durationSeconds: 30 };
   } finally {
     await cleanup(tempDir);
   }
@@ -925,32 +1002,16 @@ app.get('/api/health', (_req, res) => res.json({
   youtubeOAuthConfigured: Boolean(youtubeOAuthConfig())
 }));
 
-app.get('/api/animasi/status', requireFirebaseUser, async (_req, res) => {
-  const workerUrl = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
-  let workerOnline = false;
-  let workerError = '';
-  if (workerUrl && process.env.FLOW_WORKER_SECRET) {
-    try {
-      const response = await fetch(`${workerUrl}/health`, { headers: { 'x-flow-worker-secret': process.env.FLOW_WORKER_SECRET }, signal: AbortSignal.timeout(10000) });
-      workerOnline = response.ok;
-      if (!response.ok) workerError = `Worker HTTP ${response.status}`;
-    } catch (error) { workerError = error.message || 'Worker tidak dapat dijangkau.'; }
-  } else workerError = 'FLOW_WORKER_URL atau FLOW_WORKER_SECRET belum diatur.';
-  res.json({ geminiKey2Configured: Boolean(animationGeminiKey()), workerConfigured: Boolean(workerUrl && process.env.FLOW_WORKER_SECRET), workerOnline, workerError });
-});
-
-app.post('/api/animasi/login', requireFirebaseUser, async (_req, res) => {
-  const workerUrl = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
-  const secret = String(process.env.FLOW_WORKER_SECRET || '');
-  if (!workerUrl || !secret) return res.status(503).json({ error: 'Google Flow worker belum dikonfigurasi.' });
-  try {
-    const response = await fetch(`${workerUrl}/login`, { method: 'POST', headers: { 'x-flow-worker-secret': secret }, signal: AbortSignal.timeout(15000) });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(response.status >= 500 ? 503 : response.status).json({ error: data.error || `Worker login gagal: HTTP ${response.status}` });
-    res.json({ ok: true, message: data.message || 'Halaman login Flow dibuka pada browser worker.' });
-  } catch (error) {
-    res.status(503).json({ error: error.message || 'Worker Flow tidak dapat dijangkau.' });
-  }
+app.get('/api/animasi/status', requireFirebaseUser, (_req, res) => {
+  const configured = Boolean(animationGeminiKey());
+  res.json({
+    provider: 'Gemini API',
+    videoModel: GEMINI_OMNI_VIDEO_MODEL,
+    geminiKey2Configured: configured,
+    videoGenerationConfigured: configured,
+    paidTierRequired: true,
+    generationBusy: Boolean(activeAnimationJobId)
+  });
 });
 
 app.post('/api/animasi/idea', requireFirebaseUser, async (req, res) => {
@@ -969,14 +1030,64 @@ app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
   const aspectRatio = String(req.body?.aspectRatio || '9:16');
   if (!idea) return res.status(400).json({ error: 'Ide animasi wajib diisi.' });
   if (!['9:16', '16:9'].includes(aspectRatio)) return res.status(400).json({ error: 'Format video tidak valid.' });
-  try {
-    const plan = await createAnimationPlan({ idea, style, aspectRatio });
-    const rendered = await renderAnimation(plan, aspectRatio);
-    res.json({ ...rendered, plan, provider: 'Google Flow + Gemini API key 2' });
-  } catch (error) {
-    console.error('[animasi/produce] gagal:', error.message || error);
-    res.status(Number(error.status) || 500).json({ error: error.message || 'Produksi animasi gagal.' });
+  if (!animationGeminiKey()) return res.status(503).json({ error: 'GEMINI_API_KEY_2 belum dikonfigurasi.' });
+  if (activeAnimationJobId) return res.status(409).json({ error: 'Gemini sedang membuat video lain. Tunggu sampai job tersebut selesai.' });
+  const now = Date.now();
+  for (const [jobId, job] of animationJobs) {
+    if (job.finishedAt && now - job.finishedAt > 6 * 60 * 60 * 1000) animationJobs.delete(jobId);
   }
+  const jobId = crypto.randomUUID();
+  const job = {
+    userId: req.firebaseUser.uid,
+    status: 'processing',
+    message: 'Gemini menyiapkan storyboard…',
+    createdAt: now,
+    updatedAt: now,
+    aspectRatio
+  };
+  animationJobs.set(jobId, job);
+  activeAnimationJobId = jobId;
+  res.status(202).json({ jobId, status: job.status, message: job.message });
+  void (async () => {
+    try {
+      job.plan = await createAnimationPlan({ idea, style, aspectRatio });
+      job.message = 'Storyboard siap. Memulai pembuatan video Gemini Omni Flash…';
+      job.updatedAt = Date.now();
+      const rendered = await renderAnimation(job.plan, aspectRatio, message => {
+        job.message = message;
+        job.updatedAt = Date.now();
+      });
+      job.status = 'completed';
+      job.message = 'Video selesai dibuat oleh Gemini Omni Flash.';
+      job.videoUrl = rendered.videoUrl;
+      job.durationSeconds = rendered.durationSeconds;
+      job.provider = 'Gemini Omni Flash';
+    } catch (error) {
+      job.status = 'failed';
+      job.error = error.message || 'Produksi animasi gagal.';
+      job.message = job.error;
+      console.error('[animasi/produce] gagal:', job.error);
+    } finally {
+      job.finishedAt = Date.now();
+      job.updatedAt = job.finishedAt;
+      if (activeAnimationJobId === jobId) activeAnimationJobId = null;
+    }
+  })();
+});
+
+app.get('/api/animasi/jobs/:jobId', requireFirebaseUser, (req, res) => {
+  const job = animationJobs.get(req.params.jobId);
+  if (!job || job.userId !== req.firebaseUser.uid) return res.status(404).json({ error: 'Job video tidak ditemukan atau sesi server sudah dimulai ulang.' });
+  res.json({
+    jobId: req.params.jobId,
+    status: job.status,
+    message: job.message,
+    error: job.error || null,
+    videoUrl: job.videoUrl || null,
+    durationSeconds: job.durationSeconds || null,
+    plan: job.plan || null,
+    provider: job.provider || 'Gemini Omni Flash'
+  });
 });
 
 app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (req, res) => {

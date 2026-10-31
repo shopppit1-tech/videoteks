@@ -20,18 +20,18 @@
       <div class="hero-art" aria-hidden="true"><div class="orb">🐼</div><span class="fox">🦊</span><span class="turtle">🐢</span><div class="spark s1">✦</div><div class="spark s2">✧</div></div>
     </header>
 
-    <section class="stats" aria-label="Status studio"><div><small>Mesin video</small><b>Google Flow</b><span class="stat-note">Browser worker</span></div><div><small>Mode produksi</small><b>Cerita · 30 detik</b><span class="stat-note">Visual storytelling</span></div><div><small>Audio</small><b>Nonaktif / silent</b><span class="stat-note">Tanpa suara</span></div></section>
+    <section class="stats" aria-label="Status studio"><div><small>Mesin video</small><b>Gemini Omni Flash</b><span class="stat-note">Gemini Interactions API</span></div><div><small>Mode produksi</small><b>Cerita · 30 detik</b><span class="stat-note">Satu alur berkelanjutan</span></div><div><small>Audio</small><b>Nonaktif / silent</b><span class="stat-note">Audio hasil dihapus</span></div></section>
 
     <div class="columns">
       <section class="panel" id="productionPanel"><div class="panel-head"><div><span class="eyebrow">01 / PRODUKSI</span><h2>Buat video hook</h2></div><span class="pill">AI GENERATOR</span></div>
-        <label>Mode produksi<select disabled><option>Cerita 3 klip · 30 detik</option></select></label>
+        <label>Mode produksi<select disabled><option>Cerita berkelanjutan · 30 detik</option></select></label>
         <label>Ide hook<textarea id="idea" maxlength="1000">Seekor panda kecil menemukan bintang jatuh dan bekerja sama dengan teman-temannya untuk mengembalikannya ke langit.</textarea></label>
         <button class="secondary full" id="newIdea" type="button">✦ Buat ide unik dengan AI</button>
         <p class="hint">AI membuat konsep yang berbeda dari riwayat ide sebelumnya saat produksi otomatis berjalan.</p>
         <label>Gaya visual<select id="visualStyle"><option>Animasi 3D keluarga, warna cerah, sinematik</option><option>Stop-motion clay animation yang lucu</option><option>Animasi 3D bergaya dongeng fantasi</option><option>Animasi kartun 3D komedi slapstick</option></select></label>
         <label>Format video<select id="aspect"><option value="9:16">YouTube Shorts · 9:16 (disarankan)</option><option value="16:9">YouTube biasa · 16:9</option></select></label>
         <label class="check"><input id="autoUpload" type="checkbox" checked> Simpan hasil MP4 ke server setelah video selesai</label>
-        <button class="primary full" id="produce" type="button">✦ Buat cerita video 30 detik</button><p class="hint">Gemini membagi cerita menjadi 3 klip Google Flow berdurasi 10 detik lalu menggabungkannya menjadi MP4 30 detik.</p>
+        <button class="primary full" id="produce" type="button">✦ Buat cerita video 30 detik</button><p class="hint">Gemini Omni Flash membuat video awal lalu memperpanjang ceritanya dalam dua tahap. MP4 akhir disimpan tanpa audio.</p>
       </section>
 
       <section class="panel" id="schedulerPanel"><div class="panel-head"><div><span class="eyebrow">02 / OTOMATISASI</span><h2>Produksi harian</h2></div><span class="pill green">SCHEDULER</span></div>
@@ -39,11 +39,11 @@
         <label>Jumlah video per hari<select id="dailyCount"><option>1 video</option><option>2 video</option><option>3 video</option><option>5 video</option></select></label>
         <label>Jam mulai produksi (WIB)<input id="publishHour" type="number" min="0" max="23" value="10"></label>
         <button class="secondary full" id="saveSettings" type="button">Simpan pengaturan otomatis</button>
-        <div class="schedule-preview"><span class="schedule-icon">◷</span><div><strong id="scheduleState">Jadwal belum aktif</strong><small>Server dan Flow worker harus aktif terus-menerus.</small></div></div>
+        <div class="schedule-preview"><span class="schedule-icon">◷</span><div><strong id="scheduleState">Jadwal belum aktif</strong><small>Generasi terjadwal memakai Gemini API berbayar; pantau penggunaan API.</small></div></div>
       </section>
     </div>
 
-    <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">FLOW / BROWSER WORKER</span><h2>Koneksi Google Flow</h2></div><span id="flowBadge" class="pill">BELUM DIKONFIGURASI</span></div><p id="flowInfo">Worker Flow berjalan di komputer desktop dan terhubung melalui HTTPS tunnel yang dilindungi secret.</p><div class="button-row"><button class="secondary" id="openFlow" type="button">Buka Google Flow live</button><button class="secondary" id="checkFlow" type="button">Saya sudah login</button><button class="secondary" id="flowLogin" type="button">Login ulang via worker</button></div><p id="flowLoginInfo" class="hint">Tombol Buka Google Flow live membuka halaman asli Flow di tab baru. Selesaikan login di sana, lalu kembali ke sini dan tekan Saya sudah login.</p></section>
+    <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">GEMINI / VIDEO API</span><h2>Generator Gemini</h2></div><span id="geminiBadge" class="pill">MEMERIKSA…</span></div><p id="geminiInfo">Memeriksa konfigurasi API Gemini…</p><p class="hint">Model video Gemini Omni Flash tersedia pada tier berbayar. Tarif resmi kira-kira US$0,10 per detik video output 720p. Patokan untuk 30 detik output akhir sekitar US$3, tetapi alur extension beberapa tahap dapat menambah biaya karena tiap interaction bisa menghasilkan output; retry juga menambah pemakaian. Konfirmasi akan diminta sebelum setiap generasi.</p></section>
 
     <div class="columns lower"><section class="panel"><div class="panel-head"><div><span class="eyebrow">03 / DISTRIBUSI</span><h2>Koneksi Google</h2></div><span class="pill muted">BELUM TERHUBUNG</span></div><p class="muted-text">Hubungkan akun Google untuk memberi izin upload ke channel YouTube dan menyimpan salinan MP4 ke Google Drive.</p><button class="secondary" id="connectGoogle" type="button">▶ Hubungkan YouTube + Drive</button><p class="hint">Upload default bersifat private agar hasil dapat diperiksa sebelum dipublikasikan.</p></section>
       <section class="panel"><div class="panel-head"><div><span class="eyebrow">04 / IDE HARIAN</span><h2>Riwayat ide unik</h2></div><button class="textbtn" id="clearIdeas" type="button">Bersihkan</button></div><div id="ideaHistory" class="history"><div class="empty">Belum ada ide otomatis.</div></div></section></div>
