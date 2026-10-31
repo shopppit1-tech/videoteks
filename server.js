@@ -648,12 +648,12 @@ function coolDownGeminiKeyAfterFailure(apiKey, error) {
   rotateGeminiKeyAfter(apiKey);
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2, maxCycles = 0) {
-  const models = [...new Set([
+async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, maxAttempts = 2, maxCycles = 0, useFallbackModels = true) {
+  const models = useFallbackModels ? [...new Set([
     model || 'gemini-3.8-flash',
     process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash',
     'gemini-3.5-flash-lite'
-  ])];
+  ])] : [model || 'gemini-3.8-flash'];
   const attempts = Math.max(1, Math.floor(Number(maxAttempts) || 2));
   let lastError;
   let cycles = 0;
@@ -873,74 +873,82 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
     const inlineAudio = useInlineAudio ? await fs.readFile(audio, 'base64') : null;
     console.info(`[transcribe] audio ready mode=${useInlineAudio ? 'inline' : 'files'} bytes=${audioStats.size} extractMs=${extractionMs}`);
     const prompt = `Transkripsikan audio ini menjadi subtitle. Kembalikan JSON valid saja dengan bentuk {"segments":[{"start":0.0,"end":2.5,"text":"..."}]}. Gunakan waktu dalam detik, urutkan dari awal sampai akhir, pecah kalimat menjadi segmen pendek yang nyaman dibaca, dan tulis teks persis sesuai ucapan dalam bahasa aslinya. Jangan tambahkan markdown atau komentar.`;
-    while (true) {
-      const keys = geminiKeysInRotation();
-      if (!keys.length) {
-        const waits = configuredGeminiKeys().map(key => (geminiKeyCooldowns.get(key) || Date.now()) - Date.now()).filter(wait => wait > 0);
-        await sleep(Math.max(250, Math.min(...waits, 30000)));
-        continue;
-      }
-      for (const apiKey of keys) {
-        const keySlot = configuredGeminiKeys().indexOf(apiKey) + 1;
-        const keyCount = configuredGeminiKeys().length;
-        try {
-          let audioPart;
-          let uploadMs = 0;
-          if (useInlineAudio) {
-            audioPart = { inlineData: { mimeType: 'audio/mpeg', data: inlineAudio } };
-          } else {
-            const uploadStartedAt = performance.now();
-            const file = await uploadToGemini(audio, 'audio/mpeg', apiKey);
-            uploadMs = Math.round(performance.now() - uploadStartedAt);
-            audioPart = { fileData: { fileUri: file.uri, mimeType: file.mimeType || 'audio/mpeg' } };
-          }
-          const inferenceStartedAt = performance.now();
-          const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }, audioPart] }], generationConfig: { responseMimeType: 'application/json' } }, apiKey);
-          console.info(`[transcribe] complete mode=${useInlineAudio ? 'inline' : 'files'} bytes=${audioStats.size} extractMs=${extractionMs} uploadMs=${uploadMs} generateMs=${Math.round(performance.now() - inferenceStartedAt)} totalMs=${Math.round(performance.now() - requestStartedAt)}`);
-          const parsed = jsonPart(responseText(data));
-          const segments = (parsed?.segments || []).map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || (Number(s.start) + 2), text: String(s.text || '').trim() })).filter(s => s.text);
-          rotateGeminiKeyAfter(apiKey);
-          const text = segments.map(s => s.text).join('\n');
-          let metadata = null;
-          try {
-            // Optional metadata must not block the manual subtitle response.
-            // The Drive → YouTube pipeline generates metadata independently.
-            metadata = null;
-          } catch (metadataError) {
-            console.warn('[youtube-metadata] subtitle berhasil, tetapi judul/deskripsi gagal dibuat:', metadataError.message || metadataError.name);
-          }
-          let historyId = null;
-          let historyErrorMessage = null;
-          try {
-            const historyDoc = await historyCollection(req.firebaseUser.uid).add({
-              type: 'video-transcription',
-              title: 'Transkripsi video',
-              fileName: String(req.file.originalname || 'video').replace(/[\u0000-\u001f]/g, '').slice(0, 180),
-              text,
-              segments,
-              settings: {},
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            });
-            historyId = historyDoc.id;
-          } catch (historyError) {
-            historyErrorMessage = historyFailureMessage(historyError, 'disimpan');
-            console.warn('[history] transkripsi berhasil, tetapi riwayat gagal disimpan:', historyError.message);
-          }
-          res.json({ text, segments, metadata, historyId, historySaved: Boolean(historyId), historyError: historyErrorMessage });
-          return;
-        } catch (error) {
-          if (!isGeminiRetryableError(error.status, error.message)) {
-            rotateGeminiKeyAfter(apiKey);
-            throw error;
-          }
-          coolDownGeminiKeyAfterFailure(apiKey, error);
-          const waitSeconds = Math.max(1, Math.ceil(((geminiKeyCooldowns.get(apiKey) || Date.now()) - Date.now()) / 1000));
-          console.warn(`[transcribe] key_slot=${keySlot}/${keyCount} temporarily unavailable; rotating, retry_in=${waitSeconds}s status=${error.status || 'network'} message=${error.message || 'unknown'}`);
+    const keys = geminiKeysInRotation();
+    if (!keys.length) {
+      const error = new Error(geminiKeyWaitMessage());
+      error.status = 503;
+      throw error;
+    }
+    let lastTranscribeError = null;
+    for (const apiKey of keys) {
+      const keySlot = configuredGeminiKeys().indexOf(apiKey) + 1;
+      const keyCount = configuredGeminiKeys().length;
+      try {
+        let audioPart;
+        let uploadMs = 0;
+        if (useInlineAudio) {
+          audioPart = { inlineData: { mimeType: 'audio/mpeg', data: inlineAudio } };
+        } else {
+          const uploadStartedAt = performance.now();
+          const file = await uploadToGemini(audio, 'audio/mpeg', apiKey);
+          uploadMs = Math.round(performance.now() - uploadStartedAt);
+          audioPart = { fileData: { fileUri: file.uri, mimeType: file.mimeType || 'audio/mpeg' } };
         }
+        const inferenceStartedAt = performance.now();
+        const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }, audioPart] }], generationConfig: { responseMimeType: 'application/json' } }, apiKey, 20000, 1, 1, false);
+        console.info(`[transcribe] complete mode=${useInlineAudio ? 'inline' : 'files'} bytes=${audioStats.size} extractMs=${extractionMs} uploadMs=${uploadMs} generateMs=${Math.round(performance.now() - inferenceStartedAt)} totalMs=${Math.round(performance.now() - requestStartedAt)}`);
+        const parsed = jsonPart(responseText(data));
+        const segments = (parsed?.segments || []).map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || (Number(s.start) + 2), text: String(s.text || '').trim() })).filter(s => s.text);
+        rotateGeminiKeyAfter(apiKey);
+        const text = segments.map(s => s.text).join('\n');
+        let metadata = null;
+        try {
+          // Optional metadata must not block the manual subtitle response.
+          // The Drive → YouTube pipeline generates metadata independently.
+          metadata = null;
+        } catch (metadataError) {
+          console.warn('[youtube-metadata] subtitle berhasil, tetapi judul/deskripsi gagal dibuat:', metadataError.message || metadataError.name);
+        }
+        let historyId = null;
+        let historyErrorMessage = null;
+        try {
+          const historyDoc = await historyCollection(req.firebaseUser.uid).add({
+            type: 'video-transcription',
+            title: 'Transkripsi video',
+            fileName: String(req.file.originalname || 'video').replace(/[\u0000-\u001f]/g, '').slice(0, 180),
+            text,
+            segments,
+            settings: {},
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          });
+          historyId = historyDoc.id;
+        } catch (historyError) {
+          historyErrorMessage = historyFailureMessage(historyError, 'disimpan');
+          console.warn('[history] transkripsi berhasil, tetapi riwayat gagal disimpan:', historyError.message);
+        }
+        res.json({ text, segments, metadata, historyId, historySaved: Boolean(historyId), historyError: historyErrorMessage });
+        return;
+      } catch (error) {
+        lastTranscribeError = error;
+        if (!isGeminiRetryableError(error.status, error.message)) {
+          rotateGeminiKeyAfter(apiKey);
+          throw error;
+        }
+        coolDownGeminiKeyAfterFailure(apiKey, error);
+        const waitSeconds = Math.max(1, Math.ceil(((geminiKeyCooldowns.get(apiKey) || Date.now()) - Date.now()) / 1000));
+        console.warn(`[transcribe] key_slot=${keySlot}/${keyCount} temporarily unavailable; rotating, retry_in=${waitSeconds}s status=${error.status || 'network'} message=${error.message || 'unknown'}`);
       }
     }
-  } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+    if (lastTranscribeError) throw lastTranscribeError;
+    const noKeyError = new Error('Gemini tidak tersedia untuk transkripsi saat ini. Coba lagi sebentar.');
+    noKeyError.status = 503;
+    throw noKeyError;
+  } catch (e) {
+    console.error('[transcribe] gagal:', e.message || e);
+    const status = Number(e.status);
+    res.status(status >= 400 && status <= 599 ? status : 500).json({ error: e.message || 'Transkripsi gagal diproses.' });
+  }
   finally { await cleanup(req.file.path, audio); }
 });
 
