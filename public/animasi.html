@@ -16,22 +16,22 @@
     </nav>
 
     <header class="hero">
-      <div class="hero-copy"><span class="eyebrow">AUTOMATED ANIMATION FACTORY</span><h1>Buat animasi.<br><em>Terbitkan otomatis.</em></h1><p>Buat hook animasi visual 15 detik tanpa narasi, dialog, musik, maupun teks. Cerita disampaikan melalui aksi dan ekspresi universal.</p><div class="hero-actions"><button class="primary" id="heroCreate" type="button">✦ Buat video hook</button><span class="availability"><i></i> Dashboard siap digunakan</span></div></div>
+      <div class="hero-copy"><span class="eyebrow">AUTOMATED ANIMATION FACTORY</span><h1>Buat animasi.<br><em>Terbitkan otomatis.</em></h1><p>Buat cerita animasi visual 30 detik dari 3 klip berurutan tanpa narasi, dialog, musik, maupun teks. Cerita disampaikan melalui aksi dan ekspresi universal.</p><div class="hero-actions"><button class="primary" id="heroCreate" type="button">✦ Buat cerita video 30 detik</button><span class="availability"><i></i> Dashboard siap digunakan</span></div></div>
       <div class="hero-art" aria-hidden="true"><div class="orb">🐼</div><span class="fox">🦊</span><span class="turtle">🐢</span><div class="spark s1">✦</div><div class="spark s2">✧</div></div>
     </header>
 
-    <section class="stats" aria-label="Status studio"><div><small>Mesin video</small><b>Google Flow</b><span class="stat-note">Browser worker</span></div><div><small>Mode produksi</small><b>Hook · 15 detik</b><span class="stat-note">Visual storytelling</span></div><div><small>Audio</small><b>Nonaktif / silent</b><span class="stat-note">Tanpa suara</span></div></section>
+    <section class="stats" aria-label="Status studio"><div><small>Mesin video</small><b>Google Flow</b><span class="stat-note">Browser worker</span></div><div><small>Mode produksi</small><b>Cerita · 30 detik</b><span class="stat-note">Visual storytelling</span></div><div><small>Audio</small><b>Nonaktif / silent</b><span class="stat-note">Tanpa suara</span></div></section>
 
     <div class="columns">
       <section class="panel" id="productionPanel"><div class="panel-head"><div><span class="eyebrow">01 / PRODUKSI</span><h2>Buat video hook</h2></div><span class="pill">AI GENERATOR</span></div>
-        <label>Mode produksi<select disabled><option>Hook visual · 15 detik</option></select></label>
+        <label>Mode produksi<select disabled><option>Cerita 3 klip · 30 detik</option></select></label>
         <label>Ide hook<textarea id="idea" maxlength="1000">Seekor panda kecil menemukan bintang jatuh dan bekerja sama dengan teman-temannya untuk mengembalikannya ke langit.</textarea></label>
         <button class="secondary full" id="newIdea" type="button">✦ Buat ide unik dengan AI</button>
         <p class="hint">AI membuat konsep yang berbeda dari riwayat ide sebelumnya saat produksi otomatis berjalan.</p>
         <label>Gaya visual<select id="visualStyle"><option>Animasi 3D keluarga, warna cerah, sinematik</option><option>Stop-motion clay animation yang lucu</option><option>Animasi 3D bergaya dongeng fantasi</option><option>Animasi kartun 3D komedi slapstick</option></select></label>
         <label>Format video<select id="aspect"><option value="9:16">YouTube Shorts · 9:16 (disarankan)</option><option value="16:9">YouTube biasa · 16:9</option></select></label>
         <label class="check"><input id="autoUpload" type="checkbox" checked> Simpan hasil MP4 ke server setelah video selesai</label>
-        <button class="primary full" id="produce" type="button">✦ Buat video hook 15 detik</button><p class="hint">Hubungkan Google Flow worker untuk menjalankan render video dari komputer yang selalu aktif.</p>
+        <button class="primary full" id="produce" type="button">✦ Buat cerita video 30 detik</button><p class="hint">Gemini membagi cerita menjadi 3 klip Google Flow berdurasi 10 detik lalu menggabungkannya menjadi MP4 30 detik.</p>
       </section>
 
       <section class="panel" id="schedulerPanel"><div class="panel-head"><div><span class="eyebrow">02 / OTOMATISASI</span><h2>Produksi harian</h2></div><span class="pill green">SCHEDULER</span></div>

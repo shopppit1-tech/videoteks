@@ -734,11 +734,11 @@ async function createAnimationPlan({ idea, style, aspectRatio }) {
     error.status = 503;
     throw error;
   }
-  const prompt = `Create a production-ready, family-friendly, wordless 15-second 3D animation hook. Return JSON only with this exact schema: {"title":"short English title","idea":"concise Indonesian concept","hook":"the surprising first-frame action","payoff":"the visual payoff","scenes":[{"number":1,"visual_action":"...","video_prompt":"detailed English Google Flow prompt"},{"number":2,"visual_action":"...","video_prompt":"detailed English Google Flow prompt"}]}. Idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda, Lala the small orange fox, and Tutu the tiny green turtle unless the idea requires fewer characters. No narration, dialogue, music, sound effects, subtitles, text, letters, signs, logos, copyrighted characters, violence, or frightening content. Scene 1 must begin with the hook in the first frame. Scene 2 must complete the payoff. Repeat character appearance details in each video_prompt for consistency.`;
-  const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85, responseMimeType: 'application/json', maxOutputTokens: 1800 } }, apiKey, 60000, 1, 1, true);
+  const prompt = `Create a production-ready, family-friendly, wordless 30-second 3D animation story split into exactly 3 sequential 10-second video clips. Return JSON only with this exact schema: {"title":"short English title","idea":"concise Indonesian concept","hook":"the surprising first-frame action","payoff":"the visual payoff","scenes":[{"number":1,"visual_action":"setup and hook","video_prompt":"detailed English Google Flow prompt for a 10-second clip"},{"number":2,"visual_action":"rising action and continuity from scene 1","video_prompt":"detailed English Google Flow prompt for a 10-second clip"},{"number":3,"visual_action":"clear payoff and ending","video_prompt":"detailed English Google Flow prompt for a 10-second clip"}]}. Idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda, Lala the small orange fox, and Tutu the tiny green turtle unless the idea requires fewer characters. No narration, dialogue, music, sound effects, subtitles, text, letters, signs, logos, copyrighted characters, violence, or frightening content. Scene 1 must begin with the hook in the first frame. Scene 2 must continue exactly from scene 1. Scene 3 must complete the payoff and end cleanly. Repeat character appearance details and continuity details in every video_prompt.`;
+  const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85, responseMimeType: 'application/json', maxOutputTokens: 2600 } }, apiKey, 60000, 1, 1, true);
   const plan = parseGeminiJson(data);
-  if (!Array.isArray(plan.scenes) || plan.scenes.length < 2 || plan.scenes.some(scene => !scene.video_prompt)) throw new Error('Gemini belum menghasilkan dua prompt adegan yang lengkap.');
-  return { title: String(plan.title || 'Animated Hook').slice(0, 100), idea: String(plan.idea || idea).slice(0, 1200), hook: String(plan.hook || ''), payoff: String(plan.payoff || ''), scenes: plan.scenes.slice(0, 2).map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action || ''), video_prompt: String(scene.video_prompt).slice(0, 5000) })) };
+  if (!Array.isArray(plan.scenes) || plan.scenes.length < 3 || plan.scenes.slice(0, 3).some(scene => !scene.video_prompt)) throw new Error('Gemini belum menghasilkan tiga prompt adegan yang lengkap.');
+  return { title: String(plan.title || 'Animated 30-Second Story').slice(0, 100), idea: String(plan.idea || idea).slice(0, 1200), hook: String(plan.hook || ''), payoff: String(plan.payoff || ''), scenes: plan.scenes.slice(0, 3).map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action || ''), video_prompt: String(scene.video_prompt).slice(0, 5000) })) };
 }
 async function createFlowClip(prompt, aspectRatio) {
   const base = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
@@ -767,12 +767,12 @@ async function renderAnimation(plan, aspectRatio) {
   try {
     for (const scene of plan.scenes) {
       const clipPath = path.join(tempDir, `clip-${scene.number}.mp4`);
-      await fs.writeFile(clipPath, await createFlowClip(`${scene.video_prompt}\nSilent visual-only animation. Start immediately with the action. No audio, speech, text, subtitles or logos.`, aspectRatio));
+      await fs.writeFile(clipPath, await createFlowClip(`${scene.video_prompt}\nGenerate exactly a 10-second video clip. Start immediately with the action. This clip is scene ${scene.number} of 3 and must preserve continuity with the story. Silent visual-only animation. No audio, speech, text, subtitles or logos.`, aspectRatio));
       clipPaths.push(clipPath);
     }
     const concatFile = path.join(tempDir, 'concat.txt');
     await fs.writeFile(concatFile, clipPaths.map(file => `file '${file.replaceAll("'", "'\\''")}'`).join('\n'));
-    await exec('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', concatFile, '-t', '15', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', output]);
+    await exec('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', concatFile, '-t', '30', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', output]);
     return { id, videoUrl: `/generated-animations/${id}.mp4` };
   } finally {
     await cleanup(tempDir);
