@@ -11,6 +11,8 @@ app.use(express.json({ limit: '2mb' }));
 const PORT = Number(process.env.FLOW_WORKER_PORT || 3010);
 const SECRET = process.env.FLOW_WORKER_SECRET || '';
 const FLOW_URL = process.env.FLOW_URL || 'https://labs.google/fx/tools/flow';
+const GOOGLE_EMAIL = process.env.FLOW_GOOGLE_EMAIL || '';
+const GOOGLE_PASSWORD = process.env.FLOW_GOOGLE_PASSWORD || '';
 const PROFILE_DIR = process.env.FLOW_PROFILE_DIR || path.join(os.homedir(), '.animasi-ai-studio-flow-profile');
 const HEADLESS = String(process.env.FLOW_HEADLESS || 'false').toLowerCase() === 'true';
 const MAX_WAIT = Number(process.env.FLOW_MAX_WAIT_MS || 240000);
@@ -36,11 +38,24 @@ async function launch() {
   page = context.pages()[0] || await context.newPage();
   page.setDefaultTimeout(25000);
   await page.goto(FLOW_URL,{waitUntil:'domcontentloaded',timeout:90000}).catch(e=>{lastError=e.message;});
-  console.log('Flow browser ready. Complete Google sign-in manually in this browser window if needed.');
+  await ensureGoogleSession();
+  console.log('Flow browser ready.');
+}
+async function ensureGoogleSession() {
+  const needsLogin = /accounts\.google\.com|ServiceLogin/i.test(page.url()) || !(await page.locator('textarea:visible, [contenteditable="true"]:visible, [role="textbox"]:visible').count().catch(()=>0));
+  if (!needsLogin || !GOOGLE_EMAIL || !GOOGLE_PASSWORD) return;
+  await page.goto('https://accounts.google.com/ServiceLogin?service=wise',{waitUntil:'domcontentloaded',timeout:90000});
+  const email=page.locator('input[type="email"]:visible').first();
+  if (await email.count()) { await email.fill(GOOGLE_EMAIL); await email.press('Enter'); }
+  const password=page.locator('input[type="password"]:visible').first();
+  await password.waitFor({state:'visible',timeout:30000});
+  await password.fill(GOOGLE_PASSWORD); await password.press('Enter');
+  await page.waitForTimeout(7000);
+  await page.goto(FLOW_URL,{waitUntil:'domcontentloaded',timeout:90000});
 }
 function findPromptLocator() {
   if (process.env.FLOW_PROMPT_SELECTOR) return page.locator(process.env.FLOW_PROMPT_SELECTOR).last();
-  return page.locator('textarea, [contenteditable="true"], [role="textbox"]').last();
+  return page.locator('textarea:visible, [contenteditable="true"]:visible, [role="textbox"]:visible').last();
 }
 async function fillPrompt(prompt) {
   const loc=findPromptLocator();
@@ -113,7 +128,8 @@ app.post('/generate',auth,async(req,res)=>{
     if(!context) await launch();
     if(!page || page.isClosed()) page=await context.newPage();
     await page.goto(FLOW_URL,{waitUntil:'domcontentloaded',timeout:90000}).catch(()=>{});
-    if(/accounts\.google\.com|ServiceLogin/i.test(page.url())) throw new Error('Flow belum login. Jalankan /login dan selesaikan login Google secara manual.');
+    await ensureGoogleSession();
+    if(/accounts\.google\.com|ServiceLogin/i.test(page.url())) throw new Error('Flow belum login.');
     await fillPrompt(`${prompt}\nGenerate a silent visual-only animation. No dialogue, narration, music, sound effects, captions, subtitles, text or logos. Aspect ratio ${req.body?.aspectRatio==='16:9'?'16:9':'9:16'}.`);
     const previousVideoCount=await page.locator('video').count().catch(()=>0);
     const previousDownloadCount=process.env.FLOW_DOWNLOAD_SELECTOR
