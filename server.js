@@ -14,7 +14,7 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { createAutoUploadMediaPipeline } from './auto-upload-media-pipeline.js';
-import { createAnimationPlan as createLocalAnimationPlan, renderAnimation as renderLocalAnimation, suggestLocalIdea } from './local-animation.js';
+import { renderAnimation as renderServerAnimation } from './animation-renderer.js';
 
 const exec = promisify(execFile);
 const app = express();
@@ -720,12 +720,106 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, ma
 }
 const animationJobs = new Map();
 let activeAnimationJobId = null;
+const ANIMATION_TEXT_MODEL = 'gemini-3.8-flash';
+const ANIMATION_TTS_MODEL = 'gemini-3.8-flash-tts';
+const ANIMATION_IDEA_SEEDS = [
+  'Pipo dan teman-temannya menolong bintang kecil kembali ke langit.',
+  'Lala menemukan bunga ajaib yang membuat hutan kembali cerah.',
+  'Tutu si kura-kura membantu ikan kecil pulang ke sungai.',
+  'Tiga sahabat berbagi kue ulang tahun dengan penghuni hutan.',
+  'Pipo, Lala, dan Tutu mengejar layang-layang yang terbang tinggi.'
+];
+function suggestAnimationIdea() {
+  return ANIMATION_IDEA_SEEDS[Math.floor(Math.random() * ANIMATION_IDEA_SEEDS.length)];
+}
+
+function animationApiKey() {
+  return String(process.env.GEMINI_API_KEY_2 || '').trim();
+}
+function parseAnimationJson(value) {
+  const text = String(value || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end < start) throw new Error('Gemini 3.8 tidak mengembalikan storyboard JSON yang valid.');
+  return JSON.parse(text.slice(start, end + 1));
+}
 
 async function createAnimationPlan({ idea, style, aspectRatio }) {
-  return createLocalAnimationPlan({ idea, style, aspectRatio });
+  const apiKey = animationApiKey();
+  if (!apiKey) {
+    const error = new Error('API Gemini #2 belum tersedia di server.');
+    error.status = 503;
+    throw error;
+  }
+  const cleanIdea = String(idea || '').trim().replace(/\s+/g, ' ').slice(0, 1000);
+  const base = {
+    title: (cleanIdea.split(/[.!?\n]/)[0] || 'Cerita Animasi 20 Detik').slice(0, 100),
+    idea: cleanIdea,
+    style: String(style || '').slice(0, 120),
+    aspectRatio,
+    hook: '',
+    payoff: '',
+    narration: '',
+    scenes: []
+  };
+  const width = aspectRatio === '9:16' ? 720 : 1280;
+  const height = aspectRatio === '9:16' ? 1280 : 720;
+  const prompt = `Buat storyboard animasi anak dalam JSON valid, tanpa markdown. Ide: ${JSON.stringify(String(idea).slice(0, 1000))}. Gaya: ${JSON.stringify(String(style || '').slice(0, 120))}. Cerita ramah keluarga dengan awal-tengah-akhir, menggunakan karakter konsisten: Pipo panda kecil krem-hitam bersyal biru, Lala rubah jingga bermoncong putih dan syal hijau, Tutu kura-kura hijau mungil bercangkang emas dan tas merah. Kembalikan keys title, idea, hook, payoff, narration, scenes. narration berupa Bahasa Indonesia natural, 34–40 kata, cocok untuk 20 detik, tanpa dialog atau instruksi panggung. scenes harus array tepat 3 object; masing-masing punya number (1,2,3), visual_action (Bahasa Indonesia), dan svg (satu SVG lengkap sebagai string JSON).
+Setiap SVG harus ${width}x${height}, viewBox="0 0 ${width} ${height}", satu frame cerita yang berbeda, menampilkan tiga karakter yang sama dengan bentuk/warna/pakaian konsisten dan aksi sesuai adegan. Buat seni kartun vektor yang jelas, penuh warna, sederhana, dengan latar dan objek cerita; maksimal 24 elemen bentuk per SVG. SVG hanya boleh memakai tag svg, g, rect, circle, ellipse, line, path, polygon, polyline; atribut hanya koordinat/bentuk serta fill, stroke, stroke-width, opacity, transform, points, d. Jangan pakai text, defs, style, script, filter, image, href, url, event handler, entitas XML, komentar, atau resource eksternal. Gunakan satu <svg>...</svg> lengkap per adegan. Output JSON ringkas dan valid.`;
+  const data = await geminiRequest(ANIMATION_TEXT_MODEL, {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.65, responseMimeType: 'application/json', maxOutputTokens: 7000 }
+  }, apiKey, 90000, 1, 1, false);
+  const text = (data?.candidates?.[0]?.content?.parts || []).map(part => part.text || '').join('\n');
+  const generated = parseAnimationJson(text);
+  const narration = String(generated.narration || '').trim().slice(0, 1200);
+  const wordCount = narration.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 25 || wordCount > 50) throw new Error(`Gemini membuat narasi ${wordCount} kata; diperlukan 25–50 kata.`);
+  const scenes = Array.isArray(generated.scenes) ? generated.scenes.slice(0, 3) : [];
+  if (scenes.length !== 3 || scenes.some(scene => !scene.svg || !scene.visual_action)) throw new Error('Gemini belum menghasilkan tiga adegan SVG lengkap. Coba sekali lagi.');
+  return {
+    ...base,
+    title: String(generated.title || base.title).slice(0, 100),
+    idea: String(generated.idea || base.idea).slice(0, 1000),
+    hook: String(generated.hook || base.hook).slice(0, 300),
+    payoff: String(generated.payoff || base.payoff).slice(0, 300),
+    narration,
+    scenes: scenes.map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action).slice(0, 300), svg: String(scene.svg).slice(0, 18000) }))
+  };
 }
 async function renderAnimation(plan, aspectRatio, onProgress = () => {}) {
-  return renderLocalAnimation(plan, aspectRatio, onProgress, ANIMASI_DIR);
+  const apiKey = animationApiKey();
+  if (!apiKey) {
+    const error = new Error('API Gemini #2 belum tersedia di server.');
+    error.status = 503;
+    throw error;
+  }
+  const makeNarration = async (text, destination) => {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        model: ANIMATION_TTS_MODEL,
+        input: [{ type: 'user_input', content: [{ type: 'text', text, annotations: [{ type: 'speech_metadata', style: 'Warm, gentle Indonesian storytelling with clear diction at a natural, moderately brisk pace; finish near 20 seconds.' }] }] }],
+        response_format: { type: 'audio' },
+        generation_config: { speech_config: [{ voice: 'Sulafat' }] }
+      }),
+      signal: AbortSignal.timeout(180000)
+    });
+    const interaction = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(interaction?.error?.message || `Gemini TTS gagal: HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    if (interaction.status === 'failed') throw new Error(interaction.error?.message || 'Gemini TTS gagal membuat narasi.');
+    const audio = interaction.output_audio?.data || (interaction.steps || []).flatMap(step => step.type === 'model_output' ? (step.content || []) : []).find(content => content.type === 'audio' && content.data)?.data;
+    if (!audio) throw new Error('Gemini 3.8 Flash TTS tidak mengembalikan audio.');
+    const bytes = Buffer.from(audio, 'base64');
+    if (bytes.length < 1000) throw new Error('Audio narasi Gemini terlalu kecil atau tidak valid.');
+    await fs.writeFile(destination, bytes);
+  };
+  return renderServerAnimation(plan, aspectRatio, onProgress, ANIMASI_DIR, makeNarration);
 }
 async function uploadToGemini(filePath, mimeType, apiKey) {
   const stat = await fs.stat(filePath);
@@ -876,21 +970,21 @@ app.get('/api/health', (_req, res) => res.json({
 
 app.get('/api/animasi/status', requireFirebaseUser, (_req, res) => {
   res.json({
-    provider: 'Lokal gratis',
-    storyModel: 'Template cerita lokal',
-    imageModel: 'Ilustrasi SVG lokal',
-    narrationModel: 'eSpeak NG Indonesia',
-    noPaidApiCalls: true,
-    animationConfigured: true,
+    provider: 'Gemini API #2 · model Free Tier',
+    storyModel: ANIMATION_TEXT_MODEL,
+    imageModel: 'SVG vektor dibuat Gemini 3.8 Flash (tanpa endpoint gambar)',
+    narrationModel: ANIMATION_TTS_MODEL,
+    geminiApiKey2Configured: Boolean(animationApiKey()),
+    freeTierModelsOnly: true,
+    noPaidImageEndpoint: true,
+    animationConfigured: Boolean(animationApiKey()),
     generationBusy: Boolean(activeAnimationJobId)
   });
 });
-
 app.post('/api/animasi/idea', requireFirebaseUser, async (req, res) => {
   try {
-    const idea = suggestLocalIdea();
-    const plan = await createAnimationPlan({ idea, style: 'Animasi buku cerita berwarna', aspectRatio: '9:16' });
-    res.json({ idea: plan.idea, hook: plan.hook, payoff: plan.payoff, title: plan.title });
+    const idea = suggestAnimationIdea();
+    res.json({ idea, title: idea.split(/[.!?]/)[0] });
   } catch (error) {
     console.error('[animasi/idea] gagal:', error.message || error);
     res.status(Number(error.status) || 500).json({ error: error.message || 'Gagal membuat ide animasi.' });
@@ -912,7 +1006,7 @@ app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
   const job = {
     userId: req.firebaseUser.uid,
     status: 'processing',
-    message: 'Generator lokal sedang menyusun cerita…',
+    message: 'Gemini 3.8 Flash (API #2, Free Tier) sedang membuat cerita dan ilustrasi vektor…',
     createdAt: now,
     updatedAt: now,
     aspectRatio
@@ -923,7 +1017,7 @@ app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
   void (async () => {
     try {
       job.plan = await createAnimationPlan({ idea, style, aspectRatio });
-      job.message = 'Cerita siap. Mulai menggambar ilustrasi lokal…';
+      job.message = 'Cerita dan SVG siap. Merender tiga adegan…';
       job.updatedAt = Date.now();
       const rendered = await renderAnimation(job.plan, aspectRatio, message => {
         job.message = message;
@@ -935,7 +1029,7 @@ app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
       job.frameUrls = rendered.frameUrls;
       job.durationSeconds = rendered.durationSeconds;
       job.narration = rendered.narration;
-      job.provider = 'Lokal gratis: SVG + eSpeak NG + FFmpeg';
+      job.provider = 'Gemini 3.8 Flash + Gemini 3.8 Flash TTS · Free Tier models · SVG + FFmpeg';
     } catch (error) {
       job.status = 'failed';
       job.error = error.message || 'Produksi animasi gagal.';
@@ -961,8 +1055,15 @@ app.get('/api/animasi/jobs/:jobId', requireFirebaseUser, (req, res) => {
     frameUrls: job.frameUrls || [],
     durationSeconds: job.durationSeconds || null,
     narration: job.narration || null,
-    plan: job.plan || null,
-    provider: job.provider || 'Lokal gratis: SVG + eSpeak NG + FFmpeg'
+    plan: job.plan ? {
+      title: job.plan.title,
+      idea: job.plan.idea,
+      hook: job.plan.hook,
+      payoff: job.plan.payoff,
+      narration: job.plan.narration,
+      scenes: (job.plan.scenes || []).map(({ number, visual_action }) => ({ number, visual_action }))
+    } : null,
+    provider: job.provider || 'Gemini 3.8 Flash + Gemini 3.8 Flash TTS · Free Tier models · SVG + FFmpeg'
   });
 });
 

@@ -30,11 +30,11 @@ async function api(path, options = {}) {
 
 function render() {
   $('ideaHistory').innerHTML = history.ideas.length
-    ? history.ideas.slice().reverse().slice(0, 8).map(item => `<article class="history-item"><strong>${esc(item.idea)}</strong><small>${esc(item.date)} · lokal</small></article>`).join('')
+    ? history.ideas.slice().reverse().slice(0, 8).map(item => `<article class="history-item"><strong>${esc(item.idea)}</strong><small>${esc(item.date)} · ide contoh</small></article>`).join('')
     : '<div class="empty">Belum ada ide yang dipilih.</div>';
   $('jobs').innerHTML = history.jobs.length
     ? history.jobs.slice().reverse().slice(0, 8).map(job => `<article class="history-item"><strong>${esc(job.title)}</strong><small>${esc(job.date)} · ${esc(job.aspect)} · 20 detik</small><p class="job-status">${esc(job.status)}</p>${job.videoUrl ? `<p><a class="result-link" href="${esc(new URL(job.videoUrl, 'https://terjemah-video.onrender.com').href)}" target="_blank" rel="noopener">▶ Buka / unduh MP4</a></p>` : ''}${job.frameUrls?.length ? `<div class="frame-gallery">${job.frameUrls.map((url, index) => `<a href="${esc(new URL(url, 'https://terjemah-video.onrender.com').href)}" target="_blank" rel="noopener"><img src="${esc(new URL(url, 'https://terjemah-video.onrender.com').href)}" alt="Adegan ${index + 1}" loading="lazy"></a>`).join('')}</div>` : ''}${job.hook ? `<p>Hook: ${esc(job.hook)}</p>` : ''}${job.payoff ? `<p>Payoff: ${esc(job.payoff)}</p>` : ''}${job.narration ? `<p class="narration-preview">Narasi: ${esc(job.narration)}</p>` : ''}</article>`).join('')
-    : '<div class="empty">Belum ada produksi. Buat animasi gratis pertama kamu.</div>';
+    : '<div class="empty">Belum ada produksi. Buat animasi pertama kamu.</div>';
   $('queueCount').textContent = `${history.jobs.length} JOB`;
 }
 
@@ -44,11 +44,14 @@ function addHistoryIdea(idea) {
   render();
 }
 
-async function refreshLocalStatus() {
+async function refreshGeneratorStatus() {
   try {
     const data = await api('/api/animasi/status');
-    $('generatorBadge').textContent = data.noPaidApiCalls ? 'GRATIS · LOKAL' : 'STATUS TIDAK VALID';
-    $('generatorInfo').textContent = `${data.storyModel} · ${data.imageModel} · ${data.narrationModel}. Tidak ada panggilan API berbayar pada generator ini.`;
+    const configured = Boolean(data.geminiApiKey2Configured && data.freeTierModelsOnly && data.noPaidImageEndpoint);
+    $('generatorBadge').textContent = configured ? 'API #2 · FREE TIER MODELS' : 'API BELUM SIAP';
+    $('generatorInfo').textContent = configured
+      ? `${data.storyModel} membuat cerita dan SVG vektor; ${data.narrationModel} membuat narasi. Tidak ada permintaan ke model gambar berbayar. Jika free quota habis, job berhenti tanpa fallback.`
+      : 'API Gemini #2 belum terkonfigurasi untuk membuat animasi.';
   } catch (error) {
     $('generatorBadge').textContent = 'STATUS TIDAK TERSEDIA';
     $('generatorInfo').textContent = error.message;
@@ -58,7 +61,7 @@ async function refreshLocalStatus() {
 async function generateIdea() {
   const button = $('newIdea');
   button.disabled = true;
-  button.textContent = 'Memilih ide lokal…';
+  button.textContent = 'Memilih ide contoh…';
   try {
     const data = await api('/api/animasi/idea', { method: 'POST', body: JSON.stringify({}) });
     $('idea').value = data.idea;
@@ -67,7 +70,7 @@ async function generateIdea() {
     alert(error.message);
   } finally {
     button.disabled = false;
-    button.textContent = '✦ Pilih ide cerita gratis';
+    button.textContent = '✦ Pilih ide contoh';
   }
 }
 
@@ -75,8 +78,8 @@ async function waitForAnimation(jobId, button, historyEntry) {
   const deadline = Date.now() + MAX_WAIT_MS;
   while (Date.now() < deadline) {
     const data = await api(`/api/animasi/jobs/${encodeURIComponent(jobId)}`);
-    button.textContent = data.message || 'Sedang merender animasi lokal…';
-    historyEntry.status = data.message || 'Sedang merender animasi lokal…';
+    button.textContent = data.message || 'Sedang membuat animasi dengan Gemini…';
+    historyEntry.status = data.message || 'Sedang membuat animasi dengan Gemini…';
     save();
     render();
     if (data.status === 'completed') return data;
@@ -124,7 +127,7 @@ async function createJob() {
   const button = $('produce');
   let historyEntry = null;
   button.disabled = true;
-  button.textContent = 'Menyiapkan render lokal…';
+  button.textContent = 'Memulai Gemini Free Tier…';
   try {
     const accepted = await api('/api/animasi/produce', {
       method: 'POST',
@@ -132,7 +135,7 @@ async function createJob() {
     });
     historyEntry = {
       title: idea.slice(0, 90), date: stamp(), aspect: $('aspect').value,
-      status: accepted.message || 'Render lokal dimulai…', jobId: accepted.jobId
+      status: accepted.message || 'Job Gemini dimulai…', jobId: accepted.jobId
     };
     history.jobs.push(historyEntry);
     save();
@@ -159,7 +162,7 @@ async function createJob() {
   } finally {
     button.disabled = false;
     button.textContent = '✦ Buat animasi gratis + buka editor';
-    refreshLocalStatus();
+    refreshGeneratorStatus();
   }
 }
 
@@ -172,4 +175,4 @@ $('produce').onclick = createJob;
 $('clearIdeas').onclick = () => { history.ideas = []; save(); render(); };
 $('connectGoogle').onclick = () => { location.href = 'youtube.html'; };
 render();
-requireLogin().then(refreshLocalStatus).catch(() => {});
+requireLogin().then(refreshGeneratorStatus).catch(() => {});
