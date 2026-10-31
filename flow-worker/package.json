@@ -1,0 +1,13 @@
+{
+  "name": "videoteks-flow-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node flow-worker.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "playwright": "^1.56.1"
+  }
+}
