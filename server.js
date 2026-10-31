@@ -895,7 +895,7 @@ app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (
           audioPart = { fileData: { fileUri: file.uri, mimeType: file.mimeType || 'audio/mpeg' } };
         }
         const inferenceStartedAt = performance.now();
-        const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }, audioPart] }], generationConfig: { responseMimeType: 'application/json' } }, apiKey, 20000, 1, 1, false);
+        const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }, audioPart] }], generationConfig: { responseMimeType: 'application/json' } }, apiKey, 10000, 1, 1, true);
         console.info(`[transcribe] complete mode=${useInlineAudio ? 'inline' : 'files'} bytes=${audioStats.size} extractMs=${extractionMs} uploadMs=${uploadMs} generateMs=${Math.round(performance.now() - inferenceStartedAt)} totalMs=${Math.round(performance.now() - requestStartedAt)}`);
         const parsed = jsonPart(responseText(data));
         const segments = (parsed?.segments || []).map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || (Number(s.start) + 2), text: String(s.text || '').trim() })).filter(s => s.text);
