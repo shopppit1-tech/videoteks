@@ -17,7 +17,8 @@ const PROFILE_DIR = process.env.FLOW_PROFILE_DIR || path.join(os.homedir(), '.an
 const HEADLESS = String(process.env.FLOW_HEADLESS || 'false').toLowerCase() === 'true';
 const MAX_WAIT = Number(process.env.FLOW_MAX_WAIT_MS || 240000);
 const DOWNLOAD_DIR = process.env.FLOW_DOWNLOAD_DIR || path.join(os.homedir(), 'AnimasiAIStudioDownloads');
-let context, page, lastError = null, busy = false;
+const CDP_URL = String(process.env.FLOW_CDP_URL || '').trim();
+let browser, context, page, lastError = null, busy = false;
 
 function auth(req,res,next) {
   if (!SECRET) return res.status(503).json({error:'FLOW_WORKER_SECRET belum diatur.'});
@@ -29,13 +30,20 @@ function auth(req,res,next) {
 async function launch() {
   await fs.mkdir(PROFILE_DIR,{recursive:true});
   await fs.mkdir(DOWNLOAD_DIR,{recursive:true});
-  context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    headless: HEADLESS,
-    acceptDownloads: true,
-    viewport: { width: 1440, height: 1000 },
-    args: ['--disable-blink-features=AutomationControlled']
-  });
-  page = context.pages()[0] || await context.newPage();
+  if (CDP_URL) {
+    browser = await chromium.connectOverCDP(CDP_URL);
+    context = browser.contexts()[0];
+    const pages = context.pages();
+    page = pages.find(candidate => /flow\.google\.com|labs\.google/.test(candidate.url())) || pages[0] || await context.newPage();
+  } else {
+    context = await chromium.launchPersistentContext(PROFILE_DIR, {
+      headless: HEADLESS,
+      acceptDownloads: true,
+      viewport: { width: 1440, height: 1000 },
+      args: ['--disable-blink-features=AutomationControlled']
+    });
+    page = context.pages()[0] || await context.newPage();
+  }
   page.setDefaultTimeout(25000);
   await page.goto(FLOW_URL,{waitUntil:'domcontentloaded',timeout:90000}).catch(e=>{lastError=e.message;});
   await ensureGoogleSession();
