@@ -42,6 +42,8 @@ async function launch() {
   console.log('Flow browser ready.');
 }
 async function ensureGoogleSession() {
+  const loggedIn = (await page.getByRole('button',{name:/logout/i}).count().catch(()=>0)) || (await page.getByText(/^logout$/i).count().catch(()=>0));
+  if (loggedIn) return;
   const needsLogin = /accounts\.google\.com|ServiceLogin/i.test(page.url()) || !(await page.locator('textarea:visible, [contenteditable="true"]:visible, [role="textbox"]:visible').count().catch(()=>0));
   if (!needsLogin || !GOOGLE_EMAIL || !GOOGLE_PASSWORD) return;
   await page.goto('https://accounts.google.com/ServiceLogin?service=wise',{waitUntil:'domcontentloaded',timeout:90000});
