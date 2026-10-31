@@ -53,6 +53,16 @@ async function ensureGoogleSession() {
   await page.waitForTimeout(7000);
   await page.goto(FLOW_URL,{waitUntil:'domcontentloaded',timeout:90000});
 }
+async function openFlowComposer() {
+  const prompt=page.locator('textarea:visible, [contenteditable="true"]:visible, [role="textbox"]:visible');
+  if (await prompt.count().catch(()=>0)) return;
+  const next=page.getByRole('button',{name:/berikutnya|next/i}).last();
+  if (await next.count() && await next.isVisible().catch(()=>false)) { await next.click().catch(()=>{}); await page.waitForTimeout(1200); }
+  const project=page.getByRole('button',{name:/project baru|new project/i}).last();
+  if (await project.count() && await project.isVisible().catch(()=>false)) { await project.click(); await page.waitForTimeout(2500); }
+  const projectText=page.getByText(/^(project baru|new project)$/i).last();
+  if (!(await prompt.count().catch(()=>0)) && await projectText.count() && await projectText.isVisible().catch(()=>false)) { await projectText.click(); await page.waitForTimeout(2500); }
+}
 function findPromptLocator() {
   if (process.env.FLOW_PROMPT_SELECTOR) return page.locator(process.env.FLOW_PROMPT_SELECTOR).last();
   return page.locator('textarea:visible, [contenteditable="true"]:visible, [role="textbox"]:visible').last();
@@ -130,6 +140,7 @@ app.post('/generate',auth,async(req,res)=>{
     await page.goto(FLOW_URL,{waitUntil:'domcontentloaded',timeout:90000}).catch(()=>{});
     await ensureGoogleSession();
     if(/accounts\.google\.com|ServiceLogin/i.test(page.url())) throw new Error('Flow belum login.');
+    await openFlowComposer();
     await fillPrompt(`${prompt}\nGenerate a silent visual-only animation. No dialogue, narration, music, sound effects, captions, subtitles, text or logos. Aspect ratio ${req.body?.aspectRatio==='16:9'?'16:9':'9:16'}.`);
     const previousVideoCount=await page.locator('video').count().catch(()=>0);
     const previousDownloadCount=process.env.FLOW_DOWNLOAD_SELECTOR
