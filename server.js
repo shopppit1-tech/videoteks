@@ -720,7 +720,9 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, ma
 function animationGeminiKey() {
   return String(process.env.GEMINI_API_KEY_2 || '').trim();
 }
-const GEMINI_OMNI_VIDEO_MODEL = 'gemini-omni-1.1-flash';
+const ANIMATION_TEXT_MODEL = 'gemini-3.8-flash';
+const ANIMATION_IMAGE_MODEL = 'gemini-nano-banana-2.1';
+const ANIMATION_TTS_MODEL = 'gemini-3.8-flash-tts';
 const animationJobs = new Map();
 let activeAnimationJobId = null;
 function parseGeminiJson(data) {
@@ -737,122 +739,152 @@ async function createAnimationPlan({ idea, style, aspectRatio }) {
     error.status = 503;
     throw error;
   }
-  const prompt = `Create a production-ready, family-friendly, wordless 30-second 3D animation story for Gemini Omni Flash. Plan one continuous video as three sequential 10-second story beats that will be generated using Gemini video extension. Return JSON only with this exact schema: {"title":"short English title","idea":"concise Indonesian concept","hook":"the surprising first-frame action","payoff":"the visual payoff","scenes":[{"number":1,"visual_action":"setup and hook","video_prompt":"detailed English Gemini Omni Flash prompt for the initial 10-second segment"},{"number":2,"visual_action":"rising action and continuity from scene 1","video_prompt":"detailed English Gemini Omni Flash continuation prompt for the next 10 seconds"},{"number":3,"visual_action":"clear payoff and ending","video_prompt":"detailed English Gemini Omni Flash continuation prompt for the final 10 seconds"}]}. Idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda, Lala the small orange fox, and Tutu the tiny green turtle unless the idea requires fewer characters. No narration, dialogue, music, sound effects, subtitles, text, letters, signs, logos, copyrighted characters, violence, or frightening content. Scene 1 must start with the hook immediately. Scene 2 and 3 must continue the same action, characters, setting, and visual style without restarting. End the final beat with a clear visual payoff. Repeat the characters' appearance and continuity details in every video_prompt.`;
-  const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85, responseMimeType: 'application/json', maxOutputTokens: 2600 } }, apiKey, 60000, 1, 1, true);
+  const prompt = `Create a production-ready, family-friendly 20-second animated-photo story. Return JSON only with this exact schema: {"title":"short Indonesian title","idea":"concise Indonesian concept","hook":"first-frame action in Indonesian","payoff":"visual ending in Indonesian","character_reference_prompt":"detailed English prompt for one clean character reference image","narration":"Indonesian narration, 34 to 38 spoken words","scenes":[{"number":1,"visual_action":"short Indonesian action","image_prompt":"detailed English prompt for one portrait still image"},{"number":2,"visual_action":"short Indonesian action","image_prompt":"detailed English prompt for one portrait still image"},{"number":3,"visual_action":"short Indonesian action","image_prompt":"detailed English prompt for one portrait still image"}]}. User idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda (cream-and-black fur, blue scarf), Lala the small orange fox (white muzzle, green neckerchief), and Tutu the tiny light-green turtle (gold shell, red satchel), unless the idea requires fewer characters. Keep the same character identities, colors, proportions, clothing, setting, lighting, and render style across all three images. The character_reference_prompt must show the characters clearly and full-body; each image_prompt describes one single story moment and assumes the character reference will be supplied as an image. Create a simple beginning, middle, and ending that connect in one story. The narration must be warm, concise, natural Indonesian, suitable for a spoken duration near 20 seconds, and contain 34–38 words. No dialogue, music, subtitles, logos, readable text, copyrighted characters, violence, or frightening content. Do not use a falling-star story unless requested. Image prompts must be in English and explicitly say one image only, no collage, no panels, no text.`;
+  const data = await geminiRequest(ANIMATION_TEXT_MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.8, responseMimeType: 'application/json', maxOutputTokens: 2600 } }, apiKey, 60000, 1, 1, false);
   const plan = parseGeminiJson(data);
-  if (!Array.isArray(plan.scenes) || plan.scenes.length < 3 || plan.scenes.slice(0, 3).some(scene => !scene.video_prompt)) throw new Error('Gemini belum menghasilkan tiga prompt adegan yang lengkap.');
-  return { title: String(plan.title || 'Animated 30-Second Story').slice(0, 100), idea: String(plan.idea || idea).slice(0, 1200), hook: String(plan.hook || ''), payoff: String(plan.payoff || ''), scenes: plan.scenes.slice(0, 3).map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action || ''), video_prompt: String(scene.video_prompt).slice(0, 5000) })) };
+  if (!plan.character_reference_prompt || !plan.narration || !Array.isArray(plan.scenes) || plan.scenes.length < 3 || plan.scenes.slice(0, 3).some(scene => !scene.image_prompt)) throw new Error('Gemini 3.8 belum menghasilkan storyboard, prompt gambar, dan narasi yang lengkap.');
+  const narration = String(plan.narration).trim().slice(0, 1200);
+  const wordCount = narration.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 30 || wordCount > 45) throw new Error(`Naskah narasi harus 30–45 kata agar mendekati 20 detik; Gemini memberi ${wordCount} kata.`);
+  return {
+    title: String(plan.title || 'Cerita Animasi 20 Detik').slice(0, 100),
+    idea: String(plan.idea || idea).slice(0, 1200),
+    hook: String(plan.hook || '').slice(0, 300),
+    payoff: String(plan.payoff || '').slice(0, 300),
+    character_reference_prompt: String(plan.character_reference_prompt).slice(0, 5000),
+    narration,
+    scenes: plan.scenes.slice(0, 3).map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action || '').slice(0, 300), image_prompt: String(scene.image_prompt).slice(0, 5000) }))
+  };
 }
-function geminiVideoPart(interaction) {
-  if (interaction?.output_video?.uri || interaction?.output_video?.data) return interaction.output_video;
+async function createGeminiInteraction(apiKey, body, timeoutMs = 120000) {
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    const wrapped = new Error(error.name === 'TimeoutError' ? 'Permintaan Gemini melewati batas waktu.' : `Permintaan Gemini gagal: ${error.message}`);
+    wrapped.status = 503;
+    throw wrapped;
+  }
+  const interaction = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(interaction?.error?.message || `Gemini API gagal: HTTP ${response.status}`);
+    error.status = response.status === 429 ? 429 : (response.status >= 500 ? 503 : response.status);
+    throw error;
+  }
+  if (interaction.status === 'failed') throw new Error(interaction.error?.message || 'Gemini gagal menghasilkan aset.');
+  return interaction;
+}
+function geminiInteractionOutput(interaction, type) {
+  const direct = type === 'image' ? interaction?.output_image : interaction?.output_audio;
+  if (direct?.data) return direct;
   for (const step of interaction?.steps || []) {
     if (step.type !== 'model_output') continue;
-    const part = (step.content || []).find(content => content.type === 'video' && (content.uri || content.data));
+    const part = (step.content || []).find(content => content.type === type && content.data);
     if (part) return part;
   }
   return null;
 }
-async function createGeminiVideoInteraction({ apiKey, prompt, aspectRatio, previousInteractionId = '' }) {
-  const body = {
-    model: GEMINI_OMNI_VIDEO_MODEL,
-    input: prompt,
-    background: true,
-    response_format: { type: 'video', delivery: 'uri', aspect_ratio: aspectRatio }
-  };
-  if (previousInteractionId) body.previous_interaction_id = previousInteractionId;
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/interactions';
-  const signal = AbortSignal.timeout(10 * 60 * 1000);
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify(body),
-    signal
-  });
-  let interaction = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = interaction?.error?.message || `Gemini Omni Flash gagal: HTTP ${response.status}`;
-    const error = new Error(message);
-    error.status = response.status === 429 ? 429 : (response.status >= 500 ? 503 : response.status);
-    throw error;
+async function generateGeminiImage({ apiKey, prompt, referencePath, aspectRatio, destination }) {
+  const input = [{ type: 'text', text: prompt }];
+  if (referencePath) {
+    input.push({ type: 'image', data: (await fs.readFile(referencePath)).toString('base64'), mime_type: 'image/png' });
   }
-  if (interaction.status === 'failed') throw new Error(interaction.error?.message || 'Gemini Omni Flash gagal membuat video.');
-  if (!geminiVideoPart(interaction) && interaction.id) {
-    const deadline = Date.now() + 8 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await sleep(5000);
-      const statusResponse = await fetch(`${endpoint}/${encodeURIComponent(interaction.id)}`, {
-        headers: { 'x-goog-api-key': apiKey },
-        signal: AbortSignal.timeout(30000)
-      });
-      const statusData = await statusResponse.json().catch(() => ({}));
-      if (!statusResponse.ok) throw new Error(statusData?.error?.message || `Tidak dapat memeriksa video Gemini: HTTP ${statusResponse.status}`);
-      interaction = statusData;
-      if (interaction.status === 'failed') throw new Error(interaction.error?.message || 'Gemini Omni Flash gagal membuat video.');
-      if (geminiVideoPart(interaction)) break;
-    }
-  }
-  if (!interaction.id || !geminiVideoPart(interaction)) throw new Error('Gemini tidak mengembalikan hasil video. Periksa tier API dan coba lagi setelah memeriksa pemakaian akun.');
-  return interaction;
+  const interaction = await createGeminiInteraction(apiKey, {
+    model: ANIMATION_IMAGE_MODEL,
+    input,
+    response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: aspectRatio, image_size: '1K' }
+  }, 180000);
+  const image = geminiInteractionOutput(interaction, 'image');
+  if (!image?.data) throw new Error('Model gambar Gemini tidak mengembalikan data gambar.');
+  const bytes = Buffer.from(image.data, 'base64');
+  if (bytes.length < 10000) throw new Error('Gambar Gemini terlalu kecil atau tidak valid.');
+  await fs.writeFile(destination, bytes);
 }
-async function downloadGeminiVideo(videoPart, apiKey, destination) {
-  if (videoPart.data) {
-    await fs.writeFile(destination, Buffer.from(videoPart.data, 'base64'));
-  } else if (videoPart.uri) {
-    const uri = new URL(videoPart.uri);
-    if (uri.hostname !== 'generativelanguage.googleapis.com') throw new Error('URI video Gemini tidak dikenali.');
-    const match = uri.pathname.match(/\/files\/([a-zA-Z0-9_-]+)/);
-    if (!match) throw new Error('ID file video Gemini tidak ditemukan.');
-    const fileName = `files/${match[1]}`;
-    const fileEndpoint = `https://generativelanguage.googleapis.com/v1beta/${fileName}`;
-    const deadline = Date.now() + 4 * 60 * 1000;
-    let active = false;
-    while (Date.now() < deadline) {
-      const statusResponse = await fetch(fileEndpoint, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(30000) });
-      const statusData = await statusResponse.json().catch(() => ({}));
-      if (!statusResponse.ok) throw new Error(statusData?.error?.message || `File video Gemini gagal diperiksa: HTTP ${statusResponse.status}`);
-      if (statusData.state === 'FAILED') throw new Error('Pemrosesan file video Gemini gagal.');
-      if (statusData.state === 'ACTIVE') { active = true; break; }
-      await sleep(5000);
-    }
-    if (!active) throw new Error('File video Gemini belum siap diunduh.');
-    const downloadUrl = `https://generativelanguage.googleapis.com/v1beta/${fileName}:download?alt=media`;
-    const downloadResponse = await fetch(downloadUrl, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(120000) });
-    if (!downloadResponse.ok) throw new Error(`Unduhan video Gemini gagal: HTTP ${downloadResponse.status}`);
-    await fs.writeFile(destination, Buffer.from(await downloadResponse.arrayBuffer()));
-  } else {
-    throw new Error('Gemini tidak memberikan data atau URI video.');
-  }
-  const stat = await fs.stat(destination);
-  if (stat.size < 10000) throw new Error('File video Gemini terlalu kecil atau tidak valid.');
+async function generateGeminiNarration({ apiKey, text, destination }) {
+  const interaction = await createGeminiInteraction(apiKey, {
+    model: ANIMATION_TTS_MODEL,
+    input: [{ type: 'user_input', content: [{ type: 'text', text, annotations: [{ type: 'speech_metadata', style: 'Warm, gentle Indonesian storytelling with clear diction at a natural, moderately brisk pace; finish near 20 seconds.' }] }] }],
+    response_format: { type: 'audio' },
+    generation_config: { speech_config: [{ voice: 'Sulafat' }] }
+  }, 180000);
+  const audio = geminiInteractionOutput(interaction, 'audio');
+  if (!audio?.data) throw new Error('Gemini TTS tidak mengembalikan data audio.');
+  const bytes = Buffer.from(audio.data, 'base64');
+  if (bytes.length < 1000) throw new Error('Audio narasi Gemini terlalu kecil atau tidak valid.');
+  await fs.writeFile(destination, bytes);
+}
+async function probeDuration(filePath) {
+  const { stdout } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath]);
+  const duration = Number(String(stdout || '').trim());
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error('Durasi media tidak dapat dibaca.');
+  return duration;
 }
 async function renderAnimation(plan, aspectRatio, onProgress = () => {}) {
   const id = crypto.randomUUID();
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'videoteks-animasi-'));
-  const source = path.join(tempDir, 'gemini-omni.mp4');
+  const assetDir = path.join(ANIMASI_DIR, id);
+  const masterImage = path.join(assetDir, 'character-reference.png');
+  const narrationFile = path.join(tempDir, 'narration.wav');
   const output = path.join(ANIMASI_DIR, `${id}.mp4`);
+  let complete = false;
   try {
     const apiKey = animationGeminiKey();
     if (!apiKey) {
-      const error = new Error('GEMINI_API_KEY_2 belum dikonfigurasi untuk Gemini Omni Flash.');
+      const error = new Error('GEMINI_API_KEY_2 belum dikonfigurasi untuk produksi Animasi AI.');
       error.status = 503;
       throw error;
     }
-    let previousInteractionId = '';
-    let finalInteraction;
+    await fs.mkdir(assetDir, { recursive: true });
+    onProgress('Gemini 3.8 menyusun cerita dan karakter…');
+    await generateGeminiImage({ apiKey, prompt: `${plan.character_reference_prompt}. Show the same original characters clearly, full-body, with simple uncluttered surroundings. One image only; no collage, no panels, no readable text.`, aspectRatio, destination: masterImage });
+    const framePaths = [];
     for (const [index, scene] of plan.scenes.entries()) {
-      onProgress(index === 0 ? 'Gemini Omni Flash membuat bagian pembuka…' : `Gemini Omni Flash memperpanjang cerita (${index + 1}/3)…`);
-      const prompt = index === 0
-        ? `Create the opening 10-second segment of one continuous 30-second silent animated story. Start with this action in the first frame. Use this story beat: ${scene.video_prompt}. Keep the characters and visual style consistent for later continuation. No dialogue, narration, music, sound effects, text, subtitles, or logos. Aspect ratio ${aspectRatio}.`
-        : `Extend the existing video by 10 seconds with a seamless continuation. This is story beat ${index + 1} of 3: ${scene.video_prompt}. Preserve the exact same characters, their appearance, setting, lighting, animation style, and ongoing action from the previous video. Do not restart or recap. Continue naturally and leave the story ready for the next beat. Silent visual-only animation: no dialogue, narration, music, sound effects, text, subtitles, or logos. Aspect ratio ${aspectRatio}.`;
-      finalInteraction = await createGeminiVideoInteraction({ apiKey, prompt, aspectRatio, previousInteractionId });
-      previousInteractionId = finalInteraction.id;
+      onProgress(`Membuat gambar adegan ${index + 1}/3 dengan karakter konsisten…`);
+      const framePath = path.join(assetDir, `scene-${index + 1}.png`);
+      const prompt = `${scene.image_prompt}. This is story moment ${index + 1} of 3 in the same story. Use the attached image only as the exact character identity reference: preserve each character's face, colors, proportions, clothing, and rendering style; do not copy its layout. Depict one connected moment in the same setting and visual style. One image only, no collage, no panels, no text, no subtitles, no logos. Aspect ratio ${aspectRatio}.`;
+      await generateGeminiImage({ apiKey, prompt, referencePath: masterImage, aspectRatio, destination: framePath });
+      framePaths.push(framePath);
     }
-    onProgress('Mengunduh hasil dan menyiapkan MP4 tanpa audio…');
-    await downloadGeminiVideo(geminiVideoPart(finalInteraction), apiKey, source);
-    await exec('ffmpeg', ['-y', '-i', source, '-vf', 'tpad=stop_mode=clone:stop_duration=30', '-t', '30', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output]);
-    return { id, videoUrl: `/generated-animations/${id}.mp4`, durationSeconds: 30 };
+    onProgress('Membuat narasi Indonesia sekitar 20 detik…');
+    await generateGeminiNarration({ apiKey, text: plan.narration, destination: narrationFile });
+    const narrationDuration = await probeDuration(narrationFile);
+    if (narrationDuration < 18 || narrationDuration > 22) throw new Error(`Narasi hasil TTS berdurasi ${narrationDuration.toFixed(1)} detik; targetnya 20 detik. Ulangi produksi dengan naskah lebih pendek atau lebih panjang.`);
+    const tempo = (narrationDuration / 20).toFixed(4);
+    const width = aspectRatio === '9:16' ? 720 : 1280;
+    const height = aspectRatio === '9:16' ? 1280 : 720;
+    const sceneSeconds = 7;
+    const fps = 30;
+    const sceneFilters = framePaths.map((_, index) => `[${index}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.00045,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${width}x${height}:fps=${fps},trim=duration=${sceneSeconds},setpts=PTS-STARTPTS,setsar=1[v${index}]`);
+    const filterGraph = [
+      ...sceneFilters,
+      '[v0][v1]xfade=transition=fade:duration=0.5:offset=6.5[v01]',
+      '[v01][v2]xfade=transition=fade:duration=0.5:offset=13.0[vout]',
+      `[3:a]aresample=48000,atempo=${tempo},atrim=duration=20,asetpts=PTS-STARTPTS[aout]`
+    ].join(';');
+    const args = ['-y'];
+    for (const framePath of framePaths) args.push('-loop', '1', '-framerate', String(fps), '-t', String(sceneSeconds), '-i', framePath);
+    args.push('-i', narrationFile, '-filter_complex', filterGraph, '-map', '[vout]', '-map', '[aout]', '-t', '20', '-r', String(fps), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', output);
+    onProgress('Merakit gambar, gerak kamera, dan narasi menjadi MP4 20 detik…');
+    await exec('ffmpeg', args);
+    const stat = await fs.stat(output);
+    if (stat.size < 10000) throw new Error('File MP4 hasil render terlalu kecil atau tidak valid.');
+    complete = true;
+    return {
+      id,
+      videoUrl: `/generated-animations/${id}.mp4`,
+      frameUrls: framePaths.map((_, index) => `/generated-animations/${id}/scene-${index + 1}.png`),
+      durationSeconds: 20,
+      narration: plan.narration
+    };
   } finally {
     await cleanup(tempDir);
+    if (!complete) await cleanup(assetDir, output);
   }
 }
 async function uploadToGemini(filePath, mimeType, apiKey) {
@@ -1006,10 +1038,11 @@ app.get('/api/animasi/status', requireFirebaseUser, (_req, res) => {
   const configured = Boolean(animationGeminiKey());
   res.json({
     provider: 'Gemini API',
-    videoModel: GEMINI_OMNI_VIDEO_MODEL,
+    storyModel: ANIMATION_TEXT_MODEL,
+    imageModel: ANIMATION_IMAGE_MODEL,
+    narrationModel: ANIMATION_TTS_MODEL,
     geminiKey2Configured: configured,
-    videoGenerationConfigured: configured,
-    paidTierRequired: true,
+    animationConfigured: configured,
     generationBusy: Boolean(activeAnimationJobId)
   });
 });
@@ -1040,7 +1073,7 @@ app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
   const job = {
     userId: req.firebaseUser.uid,
     status: 'processing',
-    message: 'Gemini menyiapkan storyboard…',
+    message: 'Gemini 3.8 sedang menyusun cerita…',
     createdAt: now,
     updatedAt: now,
     aspectRatio
@@ -1051,17 +1084,19 @@ app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
   void (async () => {
     try {
       job.plan = await createAnimationPlan({ idea, style, aspectRatio });
-      job.message = 'Storyboard siap. Memulai pembuatan video Gemini Omni Flash…';
+      job.message = 'Cerita siap. Mulai membuat gambar karakter dan adegan…';
       job.updatedAt = Date.now();
       const rendered = await renderAnimation(job.plan, aspectRatio, message => {
         job.message = message;
         job.updatedAt = Date.now();
       });
       job.status = 'completed';
-      job.message = 'Video selesai dibuat oleh Gemini Omni Flash.';
+      job.message = 'Animasi MP4 20 detik selesai. Meneruskan ke halaman Terjemah Video…';
       job.videoUrl = rendered.videoUrl;
+      job.frameUrls = rendered.frameUrls;
       job.durationSeconds = rendered.durationSeconds;
-      job.provider = 'Gemini Omni Flash';
+      job.narration = rendered.narration;
+      job.provider = 'Gemini 3.8 + Nano Banana 2.1 + TTS + FFmpeg';
     } catch (error) {
       job.status = 'failed';
       job.error = error.message || 'Produksi animasi gagal.';
@@ -1084,9 +1119,11 @@ app.get('/api/animasi/jobs/:jobId', requireFirebaseUser, (req, res) => {
     message: job.message,
     error: job.error || null,
     videoUrl: job.videoUrl || null,
+    frameUrls: job.frameUrls || [],
     durationSeconds: job.durationSeconds || null,
+    narration: job.narration || null,
     plan: job.plan || null,
-    provider: job.provider || 'Gemini Omni Flash'
+    provider: job.provider || 'Gemini image, narration, and FFmpeg'
   });
 });
 

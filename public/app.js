@@ -303,6 +303,7 @@ window.addEventListener('message', (event) => {
 loadGeneratedVideo();
 $('#exportBtn').onclick = async () => {
   if (!state.file || !state.segments.length) return setStatus('Buat subtitle terlebih dahulu.', true);
+  const continueToYoutube = new URLSearchParams(location.search).get('from') === 'animation';
   const form = new FormData(); form.append('video', state.file); form.append('segments', JSON.stringify(state.segments));
   form.append('color', state.color); form.append('template', state.template); form.append('fontSize', String(state.fontSize)); form.append('position', state.position); form.append('fontFamily', state.fontFamily); form.append('format', state.outputFormat);
   const button = $('#exportBtn');
@@ -350,9 +351,14 @@ $('#exportBtn').onclick = async () => {
       $('#youtubeHandoffLink').hidden = true;
       setStatus(`Video berhasil dibuat dan akan diunduh, tetapi tidak dapat disiapkan untuk YouTube: ${handoffError.message}`, true);
     }
-    const downloadUrl = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = downloadUrl; link.download = downloadName('videoteks-subtitle', '.mp4'); link.click();
-    setTimeout(() => URL.revokeObjectURL(downloadUrl), 60000);
-    if (!$('#youtubeHandoffLink').hidden) setStatus('Video siap. Sudah diunduh dan bisa diteruskan ke halaman YouTube.');
+    if (!continueToYoutube) {
+      const downloadUrl = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = downloadUrl; link.download = downloadName('videoteks-subtitle', '.mp4'); link.click();
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 60000);
+    }
+    if (continueToYoutube && !$('#youtubeHandoffLink').hidden) {
+      setStatus('Subtitle dan MP4 siap. Membuka draft YouTube dengan visibilitas Privat…');
+      setTimeout(() => location.assign('youtube.html?handoff=latest&from=animation'), 900);
+    } else if (!$('#youtubeHandoffLink').hidden) setStatus('Video siap. Sudah diunduh dan bisa diteruskan ke halaman YouTube.');
     else if (!status.classList.contains('error')) setStatus('Selesai. Video dengan template pilihan sudah diunduh.');
   } catch (error) { setStatus(error.message, true); }
   finally { button.disabled = false; button.removeAttribute('aria-busy'); button.innerHTML = originalButton; }
