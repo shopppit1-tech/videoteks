@@ -939,6 +939,20 @@ app.get('/api/animasi/status', requireFirebaseUser, async (_req, res) => {
   res.json({ geminiKey2Configured: Boolean(animationGeminiKey()), workerConfigured: Boolean(workerUrl && process.env.FLOW_WORKER_SECRET), workerOnline, workerError });
 });
 
+app.post('/api/animasi/login', requireFirebaseUser, async (_req, res) => {
+  const workerUrl = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
+  const secret = String(process.env.FLOW_WORKER_SECRET || '');
+  if (!workerUrl || !secret) return res.status(503).json({ error: 'Google Flow worker belum dikonfigurasi.' });
+  try {
+    const response = await fetch(`${workerUrl}/login`, { method: 'POST', headers: { 'x-flow-worker-secret': secret }, signal: AbortSignal.timeout(15000) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(response.status >= 500 ? 503 : response.status).json({ error: data.error || `Worker login gagal: HTTP ${response.status}` });
+    res.json({ ok: true, message: data.message || 'Halaman login Flow dibuka pada browser worker.' });
+  } catch (error) {
+    res.status(503).json({ error: error.message || 'Worker Flow tidak dapat dijangkau.' });
+  }
+});
+
 app.post('/api/animasi/idea', requireFirebaseUser, async (req, res) => {
   try {
     const plan = await createAnimationPlan({ idea: 'Create a completely new concept with a surprising first-frame event. Avoid repeating common falling-star plots.', style: 'Animasi 3D keluarga, warna cerah, sinematik', aspectRatio: '9:16' });
