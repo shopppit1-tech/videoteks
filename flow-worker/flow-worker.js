@@ -46,8 +46,19 @@ async function ensureGoogleSession() {
   if (!needsLogin || !GOOGLE_EMAIL || !GOOGLE_PASSWORD) return;
   await page.goto('https://accounts.google.com/ServiceLogin?service=wise',{waitUntil:'domcontentloaded',timeout:90000});
   const email=page.locator('input[type="email"]:visible').first();
-  if (await email.count()) { await email.fill(GOOGLE_EMAIL); await email.press('Enter'); }
-  const password=page.locator('input[type="password"]:visible').first();
+  await email.waitFor({state:'visible',timeout:30000});
+  await email.fill(GOOGLE_EMAIL); await email.press('Enter');
+  await page.waitForTimeout(3500);
+  let password=page.locator('input[type="password"]:visible').first();
+  if (!(await password.count())) {
+    const alternate=page.getByRole('button',{name:/try another way|coba cara lain/i}).last();
+    if (await alternate.count() && await alternate.isVisible().catch(()=>false)) {
+      await alternate.click(); await page.waitForTimeout(1800);
+      const passwordChoice=page.getByText(/password|sandi/i).last();
+      if (await passwordChoice.count() && await passwordChoice.isVisible().catch(()=>false)) { await passwordChoice.click(); await page.waitForTimeout(1800); }
+    }
+    password=page.locator('input[type="password"]:visible').first();
+  }
   await password.waitFor({state:'visible',timeout:30000});
   await password.fill(GOOGLE_PASSWORD); await password.press('Enter');
   await page.waitForTimeout(7000);
