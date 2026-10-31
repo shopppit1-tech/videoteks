@@ -30,7 +30,7 @@
         <p class="hint">AI membuat konsep yang berbeda dari riwayat ide sebelumnya saat produksi otomatis berjalan.</p>
         <label>Gaya visual<select id="visualStyle"><option>Animasi 3D keluarga, warna cerah, sinematik</option><option>Stop-motion clay animation yang lucu</option><option>Animasi 3D bergaya dongeng fantasi</option><option>Animasi kartun 3D komedi slapstick</option></select></label>
         <label>Format video<select id="aspect"><option value="9:16">YouTube Shorts · 9:16 (disarankan)</option><option value="16:9">YouTube biasa · 16:9</option></select></label>
-        <label class="check"><input id="autoUpload" type="checkbox" checked> Upload otomatis ke YouTube dan Google Drive setelah video selesai</label>
+        <label class="check"><input id="autoUpload" type="checkbox" checked> Simpan hasil MP4 ke server setelah video selesai</label>
         <button class="primary full" id="produce" type="button">✦ Buat video hook 15 detik</button><p class="hint">Hubungkan Google Flow worker untuk menjalankan render video dari komputer yang selalu aktif.</p>
       </section>
 
@@ -51,6 +51,6 @@
     <section class="panel"><div class="panel-head"><div><span class="eyebrow">05 / ANTRIAN</span><h2>Riwayat produksi</h2></div><span class="pill muted" id="queueCount">0 JOB</span></div><div id="jobs" class="history"><div class="empty">Belum ada produksi. Buat animasi pertama kamu.</div></div></section>
     <footer>Animasi AI Studio · Hasil AI perlu diperiksa sebelum dipublikasikan. Pastikan konten mematuhi kebijakan platform.</footer>
   </main>
-  <script src="animasi.js" defer></script>
+  <script type="module" src="animasi.js"></script>
 </body>
 </html>

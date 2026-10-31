@@ -60,6 +60,8 @@ app.use((req, res, next) => {
   return next();
 });
 const PUBLIC_DIR = path.join(process.cwd(), 'public');
+const ANIMASI_DIR = path.join(PUBLIC_DIR, 'generated-animations');
+await fs.mkdir(ANIMASI_DIR, { recursive: true });
 async function getPublicBuildVersion(directory) {
   const hash = crypto.createHash('sha256');
   async function addDirectory(current) {
@@ -89,6 +91,7 @@ app.get('/sw.js', async (_req, res, next) => {
   }
 });
 app.use(express.static(PUBLIC_DIR));
+app.use('/generated-animations', express.static(ANIMASI_DIR, { maxAge: '1h' }));
 
 async function requireFirebaseUser(req, res, next) {
   if (!firebaseAdminAuth || !firebaseDb) {
@@ -714,6 +717,67 @@ async function geminiRequest(model, body, fixedKey = null, timeoutMs = 30000, ma
     await sleep(500);
   }
 }
+function animationGeminiKey() {
+  return String(process.env.GEMINI_API_KEY_2 || '').trim();
+}
+function parseGeminiJson(data) {
+  const text = responseText(data).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('Gemini tidak mengembalikan JSON storyboard yang valid.');
+  return JSON.parse(text.slice(start, end + 1));
+}
+async function createAnimationPlan({ idea, style, aspectRatio }) {
+  const apiKey = animationGeminiKey();
+  if (!apiKey) {
+    const error = new Error('GEMINI_API_KEY_2 belum dikonfigurasi. Animasi AI memakai API Gemini nomor 2 yang sama dengan fitur terjemahan.');
+    error.status = 503;
+    throw error;
+  }
+  const prompt = `Create a production-ready, family-friendly, wordless 15-second 3D animation hook. Return JSON only with this exact schema: {"title":"short English title","idea":"concise Indonesian concept","hook":"the surprising first-frame action","payoff":"the visual payoff","scenes":[{"number":1,"visual_action":"...","video_prompt":"detailed English Google Flow prompt"},{"number":2,"visual_action":"...","video_prompt":"detailed English Google Flow prompt"}]}. Idea: ${String(idea).slice(0, 1200)}. Visual style: ${String(style).slice(0, 160)}. Aspect ratio: ${aspectRatio}. Use Pipo the baby panda, Lala the small orange fox, and Tutu the tiny green turtle unless the idea requires fewer characters. No narration, dialogue, music, sound effects, subtitles, text, letters, signs, logos, copyrighted characters, violence, or frightening content. Scene 1 must begin with the hook in the first frame. Scene 2 must complete the payoff. Repeat character appearance details in each video_prompt for consistency.`;
+  const data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85, responseMimeType: 'application/json', maxOutputTokens: 1800 } }, apiKey, 60000, 1, 1, true);
+  const plan = parseGeminiJson(data);
+  if (!Array.isArray(plan.scenes) || plan.scenes.length < 2 || plan.scenes.some(scene => !scene.video_prompt)) throw new Error('Gemini belum menghasilkan dua prompt adegan yang lengkap.');
+  return { title: String(plan.title || 'Animated Hook').slice(0, 100), idea: String(plan.idea || idea).slice(0, 1200), hook: String(plan.hook || ''), payoff: String(plan.payoff || ''), scenes: plan.scenes.slice(0, 2).map((scene, index) => ({ number: index + 1, visual_action: String(scene.visual_action || ''), video_prompt: String(scene.video_prompt).slice(0, 5000) })) };
+}
+async function createFlowClip(prompt, aspectRatio) {
+  const base = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
+  const secret = String(process.env.FLOW_WORKER_SECRET || '');
+  if (!base || !secret) {
+    const error = new Error('Google Flow worker belum dikonfigurasi. Isi FLOW_WORKER_URL dan FLOW_WORKER_SECRET di environment server.');
+    error.status = 503;
+    throw error;
+  }
+  const response = await fetch(`${base}/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-flow-worker-secret': secret }, body: JSON.stringify({ prompt, aspectRatio }), signal: AbortSignal.timeout(Number(process.env.FLOW_WORKER_TIMEOUT_MS || 300000)) });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const error = new Error(data.error || `Google Flow worker gagal: HTTP ${response.status}`);
+    error.status = response.status >= 500 ? 503 : response.status;
+    throw error;
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length < 10000) throw new Error('Google Flow worker mengembalikan file video yang tidak valid.');
+  return bytes;
+}
+async function renderAnimation(plan, aspectRatio) {
+  const id = crypto.randomUUID();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'videoteks-animasi-'));
+  const clipPaths = [];
+  const output = path.join(ANIMASI_DIR, `${id}.mp4`);
+  try {
+    for (const scene of plan.scenes) {
+      const clipPath = path.join(tempDir, `clip-${scene.number}.mp4`);
+      await fs.writeFile(clipPath, await createFlowClip(`${scene.video_prompt}\nSilent visual-only animation. Start immediately with the action. No audio, speech, text, subtitles or logos.`, aspectRatio));
+      clipPaths.push(clipPath);
+    }
+    const concatFile = path.join(tempDir, 'concat.txt');
+    await fs.writeFile(concatFile, clipPaths.map(file => `file '${file.replaceAll("'", "'\\''")}'`).join('\n'));
+    await exec('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', concatFile, '-t', '15', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', output]);
+    return { id, videoUrl: `/generated-animations/${id}.mp4` };
+  } finally {
+    await cleanup(tempDir);
+  }
+}
 async function uploadToGemini(filePath, mimeType, apiKey) {
   const stat = await fs.stat(filePath);
   let start;
@@ -803,7 +867,7 @@ function subtitleStyle(settings) {
   const outlineColor = settings.template === 'neon' ? assColor('#38e8ff') : '&H00000000';
   return `FontName=${font},FontSize=${size},Bold=1,PrimaryColour=${color},OutlineColour=${outlineColor},${templates[settings.template] || templates.pill},Alignment=${align},MarginV=${margin}`;
 }
-async function cleanup(...files) { await Promise.all(files.filter(Boolean).map(f => fs.rm(f, { force: true }).catch(() => {}))); }
+async function cleanup(...files) { await Promise.all(files.filter(Boolean).map(f => fs.rm(f, { force: true, recursive: true }).catch(() => {}))); }
 function responseText(data) { return data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || ''; }
 async function generateYoutubeMetadataFromCaptions(captions, language = '') {
   const cleanCaptions = String(captions || '').trim().slice(0, 12000);
@@ -860,6 +924,46 @@ app.get('/api/health', (_req, res) => res.json({
   geminiYoutubeConfigured: Boolean(youtubeSeoAIConfig()),
   youtubeOAuthConfigured: Boolean(youtubeOAuthConfig())
 }));
+
+app.get('/api/animasi/status', requireFirebaseUser, async (_req, res) => {
+  const workerUrl = String(process.env.FLOW_WORKER_URL || '').replace(/\/$/, '');
+  let workerOnline = false;
+  let workerError = '';
+  if (workerUrl && process.env.FLOW_WORKER_SECRET) {
+    try {
+      const response = await fetch(`${workerUrl}/health`, { headers: { 'x-flow-worker-secret': process.env.FLOW_WORKER_SECRET }, signal: AbortSignal.timeout(10000) });
+      workerOnline = response.ok;
+      if (!response.ok) workerError = `Worker HTTP ${response.status}`;
+    } catch (error) { workerError = error.message || 'Worker tidak dapat dijangkau.'; }
+  } else workerError = 'FLOW_WORKER_URL atau FLOW_WORKER_SECRET belum diatur.';
+  res.json({ geminiKey2Configured: Boolean(animationGeminiKey()), workerConfigured: Boolean(workerUrl && process.env.FLOW_WORKER_SECRET), workerOnline, workerError });
+});
+
+app.post('/api/animasi/idea', requireFirebaseUser, async (req, res) => {
+  try {
+    const plan = await createAnimationPlan({ idea: 'Create a completely new concept with a surprising first-frame event. Avoid repeating common falling-star plots.', style: 'Animasi 3D keluarga, warna cerah, sinematik', aspectRatio: '9:16' });
+    res.json({ idea: plan.idea, hook: plan.hook, payoff: plan.payoff, title: plan.title });
+  } catch (error) {
+    console.error('[animasi/idea] gagal:', error.message || error);
+    res.status(Number(error.status) || 500).json({ error: error.message || 'Gagal membuat ide animasi.' });
+  }
+});
+
+app.post('/api/animasi/produce', requireFirebaseUser, async (req, res) => {
+  const idea = String(req.body?.idea || '').trim();
+  const style = String(req.body?.style || 'Animasi 3D keluarga, warna cerah, sinematik').trim();
+  const aspectRatio = String(req.body?.aspectRatio || '9:16');
+  if (!idea) return res.status(400).json({ error: 'Ide animasi wajib diisi.' });
+  if (!['9:16', '16:9'].includes(aspectRatio)) return res.status(400).json({ error: 'Format video tidak valid.' });
+  try {
+    const plan = await createAnimationPlan({ idea, style, aspectRatio });
+    const rendered = await renderAnimation(plan, aspectRatio);
+    res.json({ ...rendered, plan, provider: 'Google Flow + Gemini API key 2' });
+  } catch (error) {
+    console.error('[animasi/produce] gagal:', error.message || error);
+    res.status(Number(error.status) || 500).json({ error: error.message || 'Produksi animasi gagal.' });
+  }
+});
 
 app.post('/api/transcribe', requireFirebaseUser, upload.single('video'), async (req, res) => {
   if (!requireKey(res)) return;
