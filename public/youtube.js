@@ -180,9 +180,9 @@ function formatAutoUploadStatus(data) {
   if (data.status === 'error') return `Unggahan otomatis gagal: ${data.lastError || 'terjadi kesalahan.'} Video tetap di Drive dan akan dicoba pada jadwal berikutnya.`;
   if (data.status === 'uploaded' && data.lastVideoId) {
     const time = data.lastUploadedAt ? new Date(data.lastUploadedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' }) : '';
-    return `Terakhir berhasil: ${data.lastFileName || 'video'}${time ? ` · ${time} WIB` : ''}. Berikutnya satu video per hari sekitar 18.00 WIB.`;
+    return `Terakhir berhasil: ${data.lastFileName || 'video'}${time ? ` · ${time} WIB` : ''}. Berikutnya satu video per hari sekitar 17.00 WIB.`;
   }
-  if (data.status === 'empty') return 'Folder belum memiliki video baru. Pemeriksaan berikutnya besok sekitar 18.00 WIB.';
+  if (data.status === 'empty') return 'Folder belum memiliki video baru. Pemeriksaan berikutnya besok sekitar 17.00 WIB.';
   if (data.status === 'processing') {
     const stages = {
       download: 'mengambil video dari Drive',
@@ -196,7 +196,7 @@ function formatAutoUploadStatus(data) {
     };
     return `Sedang ${stages[data.processingStage] || 'memproses video'}…`;
   }
-  return `Aktif. Antrean: ${data.folderName || 'folder Drive terpilih'}. Video diproses dengan Suara AI Kore ceria, audio diganti, subtitle ditambahkan, lalu diunggah Publik satu per hari sekitar 18.00 WIB.`;
+  return `Aktif. Antrean: ${data.folderName || 'folder Drive terpilih'}. Video diproses dengan Suara AI Kore ceria, audio diganti, subtitle ditambahkan, lalu diunggah Publik satu per hari sekitar 17.00 WIB.`;
 }
 
 async function loadAutoUploadSettings() {
@@ -295,7 +295,7 @@ async function initializeDriveAutoUpload() {
 async function saveAutoUploadSettings() {
   if (autoUploadSaving) return;
   const enabled = autoUploadEnabledInput.checked;
-  if (enabled && !autoUploadSavedEnabled && !window.confirm('Aktifkan alur otomatis? Setiap hari sekitar pukul 18.00 WIB, satu video tertua yang belum diunggah dari folder ini akan dianalisis, dibuat narasi Suara AI Kore dengan gaya ceria, audio asli diganti, subtitle dibuat otomatis, lalu hasil akhirnya diunggah ke YouTube dengan visibilitas PUBLIK. Video sumber tetap di Drive dan tidak dipindah atau dihapus.')) {
+  if (enabled && !autoUploadSavedEnabled && !window.confirm('Aktifkan alur otomatis? Setiap hari sekitar pukul 17.00 WIB, satu video tertua yang belum diunggah dari folder ini akan dianalisis, dibuat narasi Suara AI Kore dengan gaya ceria, audio asli diganti, subtitle dibuat otomatis, lalu hasil akhirnya diunggah ke YouTube dengan visibilitas PUBLIK. Video sumber tetap di Drive dan tidak dipindah atau dihapus.')) {
     autoUploadEnabledInput.checked = autoUploadSavedEnabled;
     return;
   }
@@ -313,7 +313,7 @@ async function saveAutoUploadSettings() {
     });
     autoUploadEnabledInput.checked = Boolean(data.enabled);
     autoUploadStatus.textContent = data.enabled
-      ? `Aktif untuk folder “${data.folderName || 'Drive'}”. Video diproses dengan Suara AI Kore ceria, audio diganti, dan subtitle ditambahkan sebelum satu unggahan Publik per hari sekitar 18.00 WIB.`
+      ? `Aktif untuk folder “${data.folderName || 'Drive'}”. Video diproses dengan Suara AI Kore ceria, audio diganti, dan subtitle ditambahkan sebelum satu unggahan Publik per hari sekitar 17.00 WIB.`
       : 'Pengaturan disimpan. Upload otomatis nonaktif.';
     autoUploadStatus.className = 'status';
     await loadAutoUploadSettings();

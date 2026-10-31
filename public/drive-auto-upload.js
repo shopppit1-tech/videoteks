@@ -101,7 +101,7 @@ async function loadSettings() {
     else resultLink.hidden = true;
     notifySuccessfulUpload(auto);
     initialUploadStatusLoaded = true;
-    const state = auto.status === 'uploaded' ? `Unggahan terakhir: ${auto.lastFileName || 'video'}${auto.lastUploadedAt ? ` · ${new Date(auto.lastUploadedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' })} WIB` : ''}.` : auto.enabled ? (auto.status === 'error' ? `Unggah terakhir gagal: ${auto.lastError || 'periksa konfigurasi server.'}` : 'Antrean aktif. Video berikutnya diproses sekitar 18.00 WIB.') : 'Otomatis belum diaktifkan.';
+    const state = auto.status === 'uploaded' ? `Unggahan terakhir: ${auto.lastFileName || 'video'}${auto.lastUploadedAt ? ` · ${new Date(auto.lastUploadedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' })} WIB` : ''}.` : auto.enabled ? (auto.status === 'error' ? `Unggah terakhir gagal: ${auto.lastError || 'periksa konfigurasi server.'}` : 'Antrean aktif. Video berikutnya diproses sekitar 17.00 WIB.') : 'Otomatis belum diaktifkan.';
     setStatus(state, auto.status === 'error' ? 'error' : auto.status === 'uploaded' ? 'ok' : '');
   } catch (error) { setStatus(error.message || 'Status antrean belum dapat dimuat.', 'error'); }
 }
@@ -139,7 +139,7 @@ saveButton.addEventListener('click', async () => {
   if (enabled && !folderInput.value.trim()) { setStatus('Masukkan tautan atau ID folder Google Drive.', 'error'); return; }
   if (enabled && !window.confirm('Aktifkan upload otomatis satu video per hari sebagai Publik? Video mentah akan diproses oleh alur VideoTeks sebelum diunggah.')) { enabledInput.checked = false; return; }
   saving = true; saveButton.disabled = true; saveButton.textContent = 'Menyimpan…'; setAccount('youtube', youtubeConnected); setAccount('drive', driveConnected); setStatus('Memeriksa folder dan menyimpan antrean…');
-  try { const data = await api('/api/youtube/auto-upload', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, folderId: folderInput.value.trim() }) }); folderInput.value = data.folderId || folderInput.value; enabledInput.checked = Boolean(data.enabled); setStatus(data.enabled ? `Aktif untuk folder “${data.folderName || 'Drive'}”. Satu video per hari sekitar 18.00 WIB.` : 'Pengaturan otomatis dinonaktifkan.', data.enabled ? 'ok' : ''); await loadSettings(); }
+  try { const data = await api('/api/youtube/auto-upload', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, folderId: folderInput.value.trim() }) }); folderInput.value = data.folderId || folderInput.value; enabledInput.checked = Boolean(data.enabled); setStatus(data.enabled ? `Aktif untuk folder “${data.folderName || 'Drive'}”. Satu video per hari sekitar 17.00 WIB.` : 'Pengaturan otomatis dinonaktifkan.', data.enabled ? 'ok' : ''); await loadSettings(); }
   catch (error) { setStatus(error.message || 'Pengaturan gagal disimpan.', 'error'); }
   finally { saving = false; saveButton.disabled = false; saveButton.textContent = 'Simpan pengaturan'; setAccount('youtube', youtubeConnected); setAccount('drive', driveConnected); }
 });
