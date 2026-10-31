@@ -7,6 +7,7 @@ const YOUTUBE_OAUTH_SCOPES = [
 ].join(' ');
 const UPLOAD_ENDPOINT = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status';
 const CAPTIONS_UPLOAD_ENDPOINT = 'https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet';
+const freeAnimationHandoff = new URLSearchParams(location.search).get('from') === 'animation';
 await requireLogin();
 
 // Fallback for Android/PWA webviews that swallow native page scrolling.
@@ -552,7 +553,9 @@ async function loadHandoffVideo() {
     if (Array.isArray(record.tags) && record.tags.length) seoTopic.value = record.tags.join(', ');
     titleInput.dispatchEvent(new Event('input'));
     descriptionInput.dispatchEvent(new Event('input'));
-    $('#handoffHint').textContent = record.title && record.description
+    $('#handoffHint').textContent = freeAnimationHandoff
+      ? 'Video animasi lokal gratis dimuat. Gemini SEO otomatis dilewati; isi metadata sendiri atau pilih AI SEO setelah menyetujui kemungkinan biaya.'
+      : record.title && record.description
       ? 'Video subtitle dan metadata YouTube dari Gemini utama dimasukkan otomatis.'
       : sourceLanguage
         ? `Video hasil subtitle/terjemahan (${sourceLanguage}) dimasukkan otomatis.`
@@ -565,7 +568,7 @@ async function loadHandoffVideo() {
     loadingHandoff = false;
     updateControls();
   }
-  if (selectedFile) void maybeGenerateSeoMetadata();
+  if (selectedFile && !freeAnimationHandoff) void maybeGenerateSeoMetadata();
 }
 
 connectButton.addEventListener('click', () => {
@@ -640,6 +643,7 @@ descriptionInput.addEventListener('input', () => {
 
 async function generateSeoMetadata() {
   if (seoBusy || uploading) return;
+  if (freeAnimationHandoff && !window.confirm('AI SEO ini memakai Gemini API di luar generator gratis dan dapat menimbulkan biaya API. Tetap lanjutkan?')) return;
   const analyzeVideo = Boolean(selectedFile && !sourceCaptions.trim());
   if (analyzeVideo && !seoContentConsent.checked) {
     setStatus('Centang persetujuan analisis audio dan cuplikan gambar agar Gemini membuat SEO dari isi video.', true);
@@ -692,7 +696,7 @@ async function generateSeoMetadata() {
 }
 
 async function maybeGenerateSeoMetadata() {
-  if (loadingHandoff || seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim() && !selectedFile)) return;
+  if (freeAnimationHandoff || loadingHandoff || seoGenerationPromise || !seoAiConfigured || (!sourceCaptions.trim() && !seoTopic.value.trim() && !selectedFile)) return;
   if (selectedFile && !sourceCaptions.trim() && !seoContentConsent.checked) {
     setStatus('Centang persetujuan analisis isi video untuk membuat judul dan deskripsi SEO otomatis.');
     return;

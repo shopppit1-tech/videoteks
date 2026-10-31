@@ -6,50 +6,50 @@
   <meta name="theme-color" content="#0c0f1b">
   <link rel="manifest" href="manifest.webmanifest">
   <script src="page-navigation.js" defer></script>
-  <link rel="stylesheet" href="animasi.css?v=animation-pipeline-1">
-  <title>Animasi AI Studio — VideoTeks</title>
+  <link rel="stylesheet" href="animasi.css?v=free-local-2">
+  <title>Animasi AI Gratis — VideoTeks</title>
 </head>
 <body>
   <main class="animasi-app">
     <nav class="top-nav" aria-label="Pilih fitur">
-      <a href="app.html">Subtitle Video</a><a href="audio.html?standalone=1">Ganti Audio</a><a href="voice.html?standalone=1">Suara AI</a><a href="youtube.html">YouTube</a><a class="active" href="animasi.html" aria-current="page">Animasi AI</a>
+      <a href="app.html">Subtitle Video</a><a href="audio.html?standalone=1">Ganti Audio</a><a href="voice.html?standalone=1">Suara AI</a><a href="youtube.html">YouTube</a><a class="active" href="animasi.html" aria-current="page">Animasi AI Gratis</a>
     </nav>
 
     <header class="hero">
-      <div class="hero-copy"><span class="eyebrow">ANIMASI DARI GAMBAR + NARASI</span><h1>Buat animasi.<br><em>Teruskan ke YouTube.</em></h1><p>Gemini 3.8 merancang cerita, model gambar membuat karakter dan tiga adegan yang konsisten, lalu narasi Indonesia digabung menjadi MP4 animasi 20 detik.</p><div class="hero-actions"><button class="primary" id="heroCreate" type="button">✦ Buat animasi 20 detik</button><span class="availability"><i></i> Alur siap digunakan</span></div></div>
+      <div class="hero-copy"><span class="eyebrow">GENERATOR LOKAL · TANPA API BERBAYAR</span><h1>Buat animasi.<br><em>Gratis tanpa tagihan API.</em></h1><p>Ilustrasi vektor karakter yang konsisten, narasi Bahasa Indonesia dari eSpeak NG, dan render video lokal dengan FFmpeg. Tidak mengirim prompt atau meminta gambar/audio ke Gemini.</p><div class="hero-actions"><button class="primary" id="heroCreate" type="button">✦ Buat animasi gratis</button><span class="availability"><i></i> Render lokal aktif</span></div></div>
       <div class="hero-art" aria-hidden="true"><div class="orb">🐼</div><span class="fox">🦊</span><span class="turtle">🐢</span><div class="spark s1">✦</div><div class="spark s2">✧</div></div>
     </header>
 
-    <section class="stats" aria-label="Status studio"><div><small>Ide dan cerita</small><b>Gemini 3.8 Flash</b><span class="stat-note">Storyboard Indonesia</span></div><div><small>Visual</small><b>Master + 3 adegan</b><span class="stat-note">Referensi karakter konsisten</span></div><div><small>Hasil akhir</small><b>MP4 · 20 detik</b><span class="stat-note">Gerak kamera + narasi Indonesia</span></div></section>
+    <section class="stats" aria-label="Status studio"><div><small>Cerita</small><b>Template lokal</b><span class="stat-note">Tanpa panggilan model</span></div><div><small>Visual</small><b>3 ilustrasi SVG</b><span class="stat-note">Kartun konsisten, bukan foto AI</span></div><div><small>Hasil akhir</small><b>MP4 · 20 detik</b><span class="stat-note">eSpeak NG + FFmpeg</span></div></section>
 
     <div class="columns">
       <section class="panel" id="productionPanel">
-        <div class="panel-head"><div><span class="eyebrow">01 / PRODUKSI</span><h2>Buat cerita animasi</h2></div><span class="pill">GEMINI API</span></div>
-        <label>Ide cerita<textarea id="idea" maxlength="1000">Malam itu, Pipo si panda kecil melihat bintang jatuh di tepi hutan. Lala si rubah dan Tutu si kura-kura membantunya mengembalikan cahaya bintang ke langit.</textarea></label>
-        <button class="secondary full" id="newIdea" type="button">✦ Buat ide cerita baru</button>
-        <label>Gaya visual<select id="visualStyle"><option>Animasi 3D keluarga, warna cerah, sinematik</option><option>Stop-motion clay animation yang lucu</option><option>Animasi 3D bergaya dongeng fantasi</option><option>Ilustrasi buku cerita sinematik</option></select></label>
+        <div class="panel-head"><div><span class="eyebrow">01 / PRODUKSI GRATIS</span><h2>Buat cerita animasi</h2></div><span class="pill green">TANPA BIAYA API</span></div>
+        <label>Ide cerita<textarea id="idea" maxlength="1000">Malam itu, Pipo si panda kecil menemukan bintang di hutan. Lala si rubah dan Tutu si kura-kura membantu mengantarnya pulang ke langit.</textarea></label>
+        <button class="secondary full" id="newIdea" type="button">✦ Pilih ide cerita gratis</button>
+        <label>Gaya ilustrasi<select id="visualStyle"><option>Animasi buku cerita berwarna</option><option>Animasi dongeng fantasi</option><option>Ilustrasi kartun pastel</option></select></label>
         <label>Format video<select id="aspect"><option value="9:16">Vertikal 9:16 · Shorts / Reels</option><option value="16:9">Lanskap 16:9</option></select></label>
-        <button class="primary full" id="produce" type="button">✦ Buat animasi + buka Terjemah Video</button>
-        <p class="hint">Sesudah MP4 jadi, file otomatis dibuka di halaman Subtitle Video dan transkripsi dimulai. Setelah subtitle diekspor, halaman YouTube disiapkan untuk ditinjau; unggahan tetap menunggu tombol konfirmasi pengguna.</p>
+        <button class="primary full" id="produce" type="button">✦ Buat animasi gratis + buka editor</button>
+        <p class="hint">Sesudah render, MP4 otomatis dibuka di editor subtitle. Agar tidak ada biaya, transkripsi Gemini tidak dijalankan otomatis; pilih “Teruskan ke YouTube tanpa subtitle” untuk alur gratis.</p>
       </section>
 
       <section class="panel" id="pipelinePanel">
-        <div class="panel-head"><div><span class="eyebrow">02 / ALUR OTOMATIS</span><h2>Dari ide ke unggahan</h2></div><span class="pill green">HANDOFF</span></div>
-        <ol class="pipeline-list"><li><b>Gemini 3.8</b><span>Menyusun cerita dan naskah narasi Indonesia.</span></li><li><b>Gambar Gemini</b><span>Membuat referensi karakter dan tiga gambar adegan yang konsisten.</span></li><li><b>Gemini TTS + FFmpeg</b><span>Menambahkan gerak kamera, transisi, dan narasi menjadi MP4 20 detik.</span></li><li><b>Terjemah Video → YouTube</b><span>MP4 dibuka otomatis di editor subtitle. Setelah ekspor, draft masuk ke halaman YouTube.</span></li></ol>
-        <div class="privacy-callout"><strong>Kontrol unggahan</strong><span>Halaman YouTube terbuka dengan visibilitas Privat. Periksa file dan metadata, lalu tekan Upload sendiri jika sudah siap.</span></div>
+        <div class="panel-head"><div><span class="eyebrow">02 / ALUR TANPA API</span><h2>Dari ide ke MP4</h2></div><span class="pill green">LOKAL</span></div>
+        <ol class="pipeline-list"><li><b>Cerita template lokal</b><span>Menggunakan ide yang Anda masukkan dan motif cerita sederhana.</span></li><li><b>Ilustrasi SVG</b><span>Pipo si panda, Lala si rubah, dan Tutu si kura-kura digambar konsisten tanpa layanan gambar AI.</span></li><li><b>eSpeak NG + FFmpeg</b><span>Narasi sintetis Bahasa Indonesia, gerak kamera, transisi, dan MP4 20 detik dirender di server.</span></li><li><b>Editor → YouTube</b><span>Video dibuka di editor tanpa auto-transkripsi. Anda dapat meneruskan MP4 ke draft YouTube Privat tanpa subtitle.</span></li></ol>
+        <div class="privacy-callout"><strong>Unggahan tetap di tangan Anda</strong><span>Draft YouTube disiapkan dengan visibilitas Privat. Periksa video dan metadata, lalu tekan Upload sendiri.</span></div>
       </section>
     </div>
 
-    <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">GEMINI / API</span><h2>Status model</h2></div><span id="geminiBadge" class="pill">MEMERIKSA…</span></div><p id="geminiInfo">Memeriksa konfigurasi API Gemini…</p><p class="hint">Produksi memakai GEMINI_API_KEY_2 (key Gemini nomor 2), bukan Flow atau Omni. Patokan paid tier pada 31 Okt 2026: empat gambar 1K sekitar US$0,14 dan TTS 20 detik sekitar US$0,0045; belum termasuk teks, variasi tier, pajak, atau percobaan ulang. Harga dapat berubah. Konfirmasi biaya ditampilkan sebelum permintaan dibuat.</p></section>
+    <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">GRATIS / LOKAL</span><h2>Status generator</h2></div><span id="generatorBadge" class="pill green">TANPA API</span></div><p id="generatorInfo">Cerita template, SVG, eSpeak NG, dan FFmpeg berjalan tanpa memanggil Gemini atau API berbayar.</p><p class="hint">Trade-off: hasil visual berupa ilustrasi vektor kartun, bukan foto realistis; suara eSpeak terdengar sintetis. Fitur transkripsi, terjemahan, atau SEO Gemini di halaman lain adalah fitur terpisah dan dapat berbiaya jika Anda menjalankannya.</p></section>
 
     <div class="columns lower">
-      <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">03 / DISTRIBUSI</span><h2>Akun YouTube</h2></div><span class="pill muted">TINJAU DULU</span></div><p class="muted-text">Sambungkan akun pada halaman YouTube. Hasil generasi tidak diunggah otomatis ke publik; draft dibuka dengan visibilitas Privat dan menunggu tindakan Anda.</p><button class="secondary" id="connectGoogle" type="button">▶ Buka halaman YouTube</button></section>
-      <section class="panel"><div class="panel-head"><div><span class="eyebrow">04 / IDE</span><h2>Ide cerita</h2></div><button class="textbtn" id="clearIdeas" type="button">Bersihkan</button></div><div id="ideaHistory" class="history"><div class="empty">Belum ada ide yang dibuat.</div></div></section>
+      <section class="panel connection"><div class="panel-head"><div><span class="eyebrow">03 / DISTRIBUSI</span><h2>Akun YouTube</h2></div><span class="pill muted">TINJAU DULU</span></div><p class="muted-text">Sambungkan akun pada halaman YouTube. Tidak ada unggahan otomatis atau publikasi tanpa tindakan Anda.</p><button class="secondary" id="connectGoogle" type="button">▶ Buka halaman YouTube</button></section>
+      <section class="panel"><div class="panel-head"><div><span class="eyebrow">04 / IDE</span><h2>Ide cerita</h2></div><button class="textbtn" id="clearIdeas" type="button">Bersihkan</button></div><div id="ideaHistory" class="history"><div class="empty">Belum ada ide yang dipilih.</div></div></section>
     </div>
 
-    <section class="panel"><div class="panel-head"><div><span class="eyebrow">05 / RIWAYAT</span><h2>Produksi animasi</h2></div><span class="pill muted" id="queueCount">0 JOB</span></div><div id="jobs" class="history"><div class="empty">Belum ada produksi. Buat animasi pertama kamu.</div></div></section>
-    <footer>Animasi AI Studio · Periksa hasil, subtitle, dan metadata sebelum mengunggah ke YouTube.</footer>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">05 / RIWAYAT</span><h2>Produksi animasi</h2></div><span class="pill muted" id="queueCount">0 JOB</span></div><div id="jobs" class="history"><div class="empty">Belum ada produksi. Buat animasi gratis pertama kamu.</div></div></section>
+    <footer>Animasi AI Gratis · Proses render tidak memakai API generatif berbayar.</footer>
   </main>
-  <script type="module" src="animasi.js?v=animation-pipeline-1"></script>
+  <script type="module" src="animasi.js?v=free-local-2"></script>
 </body>
 </html>

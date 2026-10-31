@@ -28,6 +28,7 @@ document.addEventListener('touchmove', (event) => {
 }, { passive: false });
 
 const state = { file: null, segments: [], translationTarget: '', color: '#ec4899', template: 'pill', fontSize: 8, position: 'bottom', fontFamily: 'DejaVu Sans', outputFormat: 'source' };
+const freeAnimationFlow = new URLSearchParams(location.search).get('from') === 'animation';
 const previewFontStacks = {
   'DejaVu Sans': 'system-ui, -apple-system, "Segoe UI", sans-serif',
   'DejaVu Serif': 'Georgia, "Times New Roman", serif',
@@ -148,8 +149,18 @@ fileInput.onchange = (event) => {
   video.onloadedmetadata = () => { $('#seek').max = video.duration; $('#duration').textContent = fmt(video.duration); applyPreviewFormat(); };
   $('#empty').style.display = 'none';
   $('#videoWrap').classList.add('has-video');
-  setStatus('Video dipilih. AI mulai mengenali suara secara otomatis...');
-  void transcribeCurrentFile();
+  if (freeAnimationFlow) {
+    const handoffLink = $('#youtubeHandoffLink');
+    handoffLink.href = 'youtube.html?handoff=latest&from=animation';
+    handoffLink.textContent = '▶ Teruskan MP4 ke YouTube tanpa subtitle';
+    setStatus('MP4 animasi siap. Transkripsi otomatis dilewati agar tidak memanggil Gemini berbayar.');
+    void saveYoutubeHandoff(state.file, { name: state.file.name || 'animasi-gratis.mp4' })
+      .then(() => { handoffLink.hidden = false; setStatus('MP4 siap tanpa biaya API. Anda dapat meneruskan ke draft YouTube Privat tanpa subtitle.'); })
+      .catch((error) => setStatus(`Video siap, tetapi handoff ke YouTube gagal: ${error.message}`, true));
+  } else {
+    setStatus('Video dipilih. AI mulai mengenali suara secara otomatis...');
+    void transcribeCurrentFile();
+  }
 };
 $('#playBtn').onclick = () => video.paused ? video.play() : video.pause();
 $('#muteBtn').onclick = () => { video.muted = !video.muted; $('#muteBtn').textContent = video.muted ? '🔇 Suara dimatikan' : '🔊 Suara asli'; };
@@ -172,6 +183,7 @@ $('#fontFamily').onchange = (e) => { state.fontFamily = e.target.value; applyPre
 $('#outputFormat').onchange = (e) => { state.outputFormat = e.target.value; applyPreviewFormat(); scheduleHistorySave(); };
 async function transcribeCurrentFile() {
   if (!state.file) return setStatus('Pilih video terlebih dahulu.', true);
+  if (freeAnimationFlow && !window.confirm('Transkripsi ini memakai Gemini API di luar generator gratis dan dapat menimbulkan biaya API. Tetap lanjutkan?')) return;
   if (transcribeController) transcribeController.abort();
   const controller = new AbortController();
   const selectedFile = state.file;
@@ -219,6 +231,7 @@ $('#translateBtn').onclick = async () => {
   const target = $('#translationTarget').value.trim();
   if (!state.segments.length) return setStatus('Buat teks subtitle terlebih dahulu.', true);
   if (!target) return setStatus('Pilih bahasa tujuan terjemahan.', true);
+  if (freeAnimationFlow && !window.confirm('Terjemahan ini memakai Gemini API di luar generator gratis dan dapat menimbulkan biaya API. Tetap lanjutkan?')) return;
   const button = $('#translateBtn');
   button.disabled = true;
   setStatus(`Menerjemahkan subtitle ke ${target}...`);

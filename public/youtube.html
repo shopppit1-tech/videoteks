@@ -89,10 +89,11 @@
         <small><span id="descriptionCount">0</span>/5.000 karakter</small>
       </div>
       <div class="field">
-        <label for="seoTopic">Kata kunci SEO (otomatis terisi; bisa diedit)</label>
+        <label for="seoTopic">Kata kunci SEO (opsional; bisa diisi manual)</label>
         <input id="seoTopic" class="text single" type="text" maxlength="500" placeholder="Kata kunci SEO akan muncul di sini setelah dibuat">
         <small id="seoHint"></small>
-        <button id="seoButton" class="btn secondary seo-button" type="button">Buat judul &amp; deskripsi dari subtitle (Gemini utama)</button>
+        <button id="seoButton" class="btn secondary seo-button" type="button">Buat judul &amp; deskripsi dengan Gemini (opsional)</button>
+        <small>SEO Gemini tidak dijalankan otomatis untuk handoff animasi gratis dan dapat menimbulkan biaya jika dipilih.</small>
       </div>
       <small id="seoTagsHint" class="muted"></small>
       <input id="seoContentConsent" type="checkbox" checked hidden>
@@ -107,7 +108,7 @@
       <input id="rightsCheck" type="checkbox" checked hidden>
       <button id="uploadButton" class="btn upload-btn" type="submit" disabled>Upload ke YouTube</button>
       <div id="progress" class="progress" hidden><div id="progressFill" class="progress-fill"></div></div>
-      <div id="status" class="status" aria-live="polite">Pilih video untuk membuat metadata otomatis.</div>
+      <div id="status" class="status" aria-live="polite">Pilih video. Metadata dapat diisi manual; SEO Gemini opsional dan bisa berbiaya.</div>
       <a id="successLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat video yang diunggah</a>
     </form>
     <section class="card" aria-labelledby="autoUploadTitle">
@@ -138,6 +139,6 @@
       <a id="autoUploadSuccessLink" class="success-link" target="_blank" rel="noopener noreferrer" hidden>Lihat unggahan otomatis terakhir</a>
     </section>
   </main>
-  <script type="module" src="youtube.js?v=animation-handoff-1"></script>
+  <script type="module" src="youtube.js?v=free-local-2"></script>
 </body>
 </html>
