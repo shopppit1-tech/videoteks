@@ -577,7 +577,7 @@ function historyFailureMessage(error, action) {
 const TTS_VOICES = new Set(['Achernar', 'Achird', 'Algenib', 'Algieba', 'Alnilam', 'Aoede', 'Autonoe', 'Callirrhoe', 'Charon', 'Despina', 'Enceladus', 'Erinome', 'Fenrir', 'Gacrux', 'Iapetus', 'Kore', 'Laomedeia', 'Leda', 'Orus', 'Puck', 'Pulcherrima', 'Rasalgethi', 'Sadachbia', 'Sadaltager', 'Schedar', 'Sulafat', 'Umbriel', 'Vindemiatrix', 'Zephyr', 'Zubenelgenubi']);
 
 function requireKey(res) {
-  if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2 && !process.env.GEMINI_API_KEY_3) {
+  if (!configuredGeminiKeys().length) {
     res.status(503).json({ error: 'GEMINI_API_KEY belum diatur di environment variable server.' });
     return false;
   }
@@ -591,7 +591,7 @@ function requireTtsKey(res) {
   return true;
 }
 function configuredGeminiKeys() {
-  return [...new Set([process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEY_2, process.env.GEMINI_API_KEY_3].filter(Boolean))];
+  return [...new Set([process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEY_2, process.env.GEMINI_API_KEY_3].map(key => String(key || '').trim()).filter(Boolean))];
 }
 function geminiKeysInRotation() {
   const keys = configuredGeminiKeys();
@@ -855,6 +855,8 @@ app.get('/api/health', (_req, res) => res.json({
   ok: true,
   service: 'videoteks',
   provider: 'gemini',
+  geminiApiKeysConfigured: configuredGeminiKeys().length,
+  geminiApiKeysAvailable: geminiKeysInRotation().length,
   geminiYoutubeConfigured: Boolean(youtubeSeoAIConfig()),
   youtubeOAuthConfigured: Boolean(youtubeOAuthConfig())
 }));
@@ -959,16 +961,34 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
   try {
     console.info('[translate] request:', JSON.stringify({ target: String(target).slice(0, 64), characters: String(text).length, lines: String(text).split(/\r?\n/).length }));
     const prompt = `Terjemahkan setiap baris subtitle berikut ke ${target}. Pertahankan jumlah dan urutan baris. Pisahkan hasil setiap baris dengan token <<<SEG>>> (tepat satu token di antara dua baris). Jangan gunakan token <<<SEG>>> di dalam terjemahan. Kembalikan hanya hasil terjemahan tanpa nomor baris, komentar, markdown, atau baris kosong.\n\n${text}`;
-    const translationKey = String(process.env.GEMINI_API_KEY_2 || '').trim() || null;
-    console.info(`[translate] provider=gemini key=${translationKey ? '2' : 'rotation'}`);
-    let data;
-    try {
-      data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }, translationKey, 30000, 2, 1);
-    } catch (primaryError) {
-      if (!translationKey || !isGeminiRetryableError(primaryError.status, primaryError.message)) throw primaryError;
-      console.warn('[translate] Gemini API nomor 2 gagal sementara; mencoba rotasi fallback.');
-      data = await geminiRequest(MODEL, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }, null, 30000, 2, 1);
+    const preferredTranslationKey = String(process.env.GEMINI_API_KEY_2 || '').trim();
+    const translationKeys = geminiKeysInRotation();
+    if (preferredTranslationKey && translationKeys.includes(preferredTranslationKey)) {
+      translationKeys.splice(translationKeys.indexOf(preferredTranslationKey), 1);
+      translationKeys.unshift(preferredTranslationKey);
     }
+    if (!translationKeys.length) {
+      const waitError = new Error(geminiKeyWaitMessage());
+      waitError.status = 503;
+      throw waitError;
+    }
+    console.info(`[translate] provider=gemini configured_keys=${configuredGeminiKeys().length} available_keys=${translationKeys.length}`);
+    const requestBody = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } };
+    let data;
+    let lastTranslationError = null;
+    for (const apiKey of translationKeys) {
+      try {
+        data = await geminiRequest(MODEL, requestBody, apiKey, 10000, 1, 1, true);
+        break;
+      } catch (translationError) {
+        lastTranslationError = translationError;
+        if (!isGeminiRetryableError(translationError.status, translationError.message)) throw translationError;
+        coolDownGeminiKeyAfterFailure(apiKey, translationError);
+        const keySlot = configuredGeminiKeys().indexOf(apiKey) + 1;
+        console.warn(`[translate] key_slot=${keySlot}/${configuredGeminiKeys().length} temporarily unavailable; rotating status=${translationError.status || 'network'} message=${translationError.message || 'unknown'}`);
+      }
+    }
+    if (!data) throw lastTranslationError || new Error('Gemini tidak tersedia untuk menerjemahkan saat ini.');
     const translatedText = responseText(data).trim();
     let historyId = null;
     let historySaved = false;
@@ -1002,7 +1022,8 @@ app.post('/api/translate', requireFirebaseUser, async (req, res) => {
     res.json({ text: translatedText, historyId, historySaved, historyError });
   } catch (e) {
     console.error('[translate] gagal:', e.message || e.name || 'Error');
-    res.status(e.status === 429 ? 429 : 500).json({ error: e.message || 'Terjemahan gagal dibuat.' });
+    const status = Number(e.status);
+    res.status(status >= 400 && status <= 599 ? status : 500).json({ error: e.message || 'Terjemahan gagal dibuat.' });
   }
 });
 
