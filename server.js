@@ -1895,7 +1895,7 @@ app.get('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
       lastFileName: job.lastFileName || '',
       lastTitle: job.lastTitle || '',
       lastVideoId: job.lastVideoId || null,
-      scheduleTime: '05:00',
+      scheduleTime: '03:00',
       timeZone: 'Asia/Jakarta',
       privacyStatus: 'public'
     });
@@ -1934,14 +1934,14 @@ app.put('/api/youtube/auto-upload', requireFirebaseUser, async (req, res) => {
       folderName,
       enabled,
       pipelineVersion: AUTO_UPLOAD_PIPELINE_VERSION,
-      scheduleTime: '05:00',
+      scheduleTime: '03:00',
       timeZone: 'Asia/Jakarta',
       privacyStatus: 'public',
       status: enabled ? 'waiting' : 'disabled',
       lastError: '',
       updatedAt: Date.now()
     }, { merge: true });
-    res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '05:00', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
+    res.json({ ok: true, enabled, folderId, folderName, scheduleTime: '03:00', timeZone: 'Asia/Jakarta', privacyStatus: 'public' });
   } catch (error) {
     if (error.reconnect) {
       console.warn('[youtube-auto-upload] izin integrasi perlu disambungkan ulang:', error.integration);
