@@ -2,8 +2,8 @@ name: Daily YouTube upload from Drive
 
 on:
   schedule:
-    # GitHub Actions cron uses UTC: 10:00 UTC = 17:00 Asia/Jakarta.
-    - cron: '0 10 * * *'
+    # GitHub Actions cron uses UTC: 22:00 UTC = 05:00 Asia/Jakarta the next day.
+    - cron: '0 22 * * *'
   workflow_dispatch:
     inputs:
       force:
